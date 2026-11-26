@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { asD1, createTestDb, seedPayment, type TestDb } from "../test/d1";
+import type { TestDb } from "../test/d1";
+import { TENANT_A } from "../test/d1-cloud";
+import { createHarness, seedPaymentFor, type Harness, type SeedPaymentInput } from "../test/harness";
 import { generateKey, signMessage, txtFor, type TestKey } from "../test/sign";
 import { autoLinkPayment } from "./auto-link";
 import { verifyDkim } from "./dkim";
@@ -57,18 +59,22 @@ function mail(raw: string, forward = vi.fn(async () => ({ messageId: "x" }))): M
   return { message, forward };
 }
 
+let h: Harness;
 let db: TestDb;
+const seedPayment = (overrides?: SeedPaymentInput): string => seedPaymentFor(h.raw, TENANT_A, overrides).id;
 let key: TestKey;
 let logs: Array<Record<string, unknown>>;
 
-const env = () => ({ DB: asD1(db), FORWARD_TO: "treasurer@example.test" });
+const ctxOf = async () => h.a;
+const env = () => ({ FORWARD_TO: "treasurer@example.test" });
 const verify = (raw: Uint8Array) => verifyDkim(raw, { domain: "deunaapp.com", resolveTxt: txtFor(key) });
-const run = (m: Mail, deps: Parameters<typeof handleEmail>[2] = { verify, now: () => NOW }) => handleEmail(m.message, env(), deps);
+const run = (m: Mail, deps: Parameters<typeof handleEmail>[3] = { verify, now: () => NOW }) => handleEmail(m.message, env(), ctxOf, deps);
 const events = () => logs.map((l) => l["message"]);
 const movements = () => db.sqlite.prepare("SELECT * FROM bank_movements").all() as Array<Record<string, unknown>>;
 
 beforeEach(async () => {
-  db = createTestDb();
+  h = createHarness();
+  db = h.raw;
   key ??= await generateKey();
   logs = [];
   vi.spyOn(console, "log").mockImplementation((line: unknown) => {
@@ -78,11 +84,13 @@ beforeEach(async () => {
 afterEach(() => {
   if (process.env["DBG"]) process.stderr.write(JSON.stringify(logs) + "\n");
   vi.restoreAllMocks();
+  // Every statement of every test in this file ran as tenant A and passed the scope checker (tests that never reach the database record none).
+  if (h.spy.statements.length > 0) h.spy.assertAllScoped(TENANT_A);
 });
 
 describe("email handler", () => {
   it("stores the movement and auto-links a clear match, moving the payment to recibido", async () => {
-    const id = seedPayment(db, { parentName: "Lucia Anais Torres", surnames: ["Perez"], createdAt: "2026-11-25T20:00:00.000Z" });
+    const id = seedPayment({ parentName: "Lucia Anais Torres", surnames: ["Perez"], createdAt: "2026-11-25T20:00:00.000Z" });
     const raw = await signMessage(key, mime(), TEXT);
     const m = mail(raw);
     await run(m);
@@ -113,8 +121,8 @@ describe("email handler", () => {
   });
 
   it("never marks a payment as pagado nor touches pagado/anulado", async () => {
-    const paid = seedPayment(db, { parentName: "Lucia Anais Torres", status: "pagado", createdAt: "2026-11-25T20:00:00.000Z" });
-    const void_ = seedPayment(db, { parentName: "Lucia Anais Torres", status: "anulado", createdAt: "2026-11-25T20:00:00.000Z" });
+    const paid = seedPayment({ parentName: "Lucia Anais Torres", status: "pagado", createdAt: "2026-11-25T20:00:00.000Z" });
+    const void_ = seedPayment({ parentName: "Lucia Anais Torres", status: "anulado", createdAt: "2026-11-25T20:00:00.000Z" });
     await run(mail(await signMessage(key, mime(), TEXT)));
     expect(movements()[0]).toMatchObject({ match_status: "unmatched", payment_id: null });
     for (const id of [paid, void_]) {
@@ -123,15 +131,15 @@ describe("email handler", () => {
   });
 
   it("keeps a recibido payment as recibido and an observado one becomes recibido", async () => {
-    const received = seedPayment(db, { parentName: "Lucia Anais Torres", status: "recibido", createdAt: "2026-11-25T20:00:00.000Z" });
+    const received = seedPayment({ parentName: "Lucia Anais Torres", status: "recibido", createdAt: "2026-11-25T20:00:00.000Z" });
     await run(mail(await signMessage(key, mime(), TEXT)));
     expect(db.sqlite.prepare("SELECT status, reviewed_by FROM payments WHERE id = ?").get(received)).toMatchObject({ status: "recibido", reviewed_by: null });
     expect(movements()[0]).toMatchObject({ payment_id: received, match_status: "auto" });
   });
 
   it("leaves the movement unmatched when two families fit", async () => {
-    seedPayment(db, { parentName: "Lucia Anais Torres", createdAt: "2026-11-25T20:00:00.000Z" });
-    seedPayment(db, { parentName: "Anais Torres Mendez", createdAt: "2026-11-25T21:00:00.000Z" });
+    seedPayment({ parentName: "Lucia Anais Torres", createdAt: "2026-11-25T20:00:00.000Z" });
+    seedPayment({ parentName: "Anais Torres Mendez", createdAt: "2026-11-25T21:00:00.000Z" });
     await run(mail(await signMessage(key, mime(), TEXT)));
     expect(movements()[0]).toMatchObject({ match_status: "unmatched", payment_id: null });
   });
@@ -217,7 +225,7 @@ describe("email handler", () => {
   it("skips parsing for oversized messages but still forwards", async () => {
     const m = mail("x");
     const big = { ...m.message, rawSize: MAX_RAW_BYTES + 1 } as unknown as ForwardableEmailMessage;
-    await handleEmail(big, env(), { verify, now: () => NOW });
+    await handleEmail(big, env(), ctxOf, { verify, now: () => NOW });
     expect(m.forward).toHaveBeenCalledTimes(1);
     expect(movements()).toHaveLength(0);
     expect(logs).toContainEqual(expect.objectContaining({ message: "deuna_mail_ignored", reason: "too_large" }));
@@ -239,7 +247,7 @@ describe("email handler", () => {
       return { messageId: "x" };
     });
     const message = { ...m.message, raw: stream, rawSize: bytes.byteLength, forward } as unknown as ForwardableEmailMessage;
-    await handleEmail(message, env(), { verify, now: () => NOW });
+    await handleEmail(message, env(), ctxOf, { verify, now: () => NOW });
     expect(order).toEqual(["read", "forward"]);
     expect(movements()).toHaveLength(1);
   });
@@ -251,7 +259,7 @@ describe("email handler", () => {
         throw new Error("stream failed");
       },
     });
-    await handleEmail({ ...m.message, raw: broken, rawSize: 10 } as unknown as ForwardableEmailMessage, env(), { verify, now: () => NOW });
+    await handleEmail({ ...m.message, raw: broken, rawSize: 10 } as unknown as ForwardableEmailMessage, env(), ctxOf, { verify, now: () => NOW });
     expect(m.forward).toHaveBeenCalledTimes(1);
     expect(events()).toContain("deuna_mail_read_failed");
   });
@@ -281,7 +289,7 @@ describe("email handler", () => {
     const fetchMock = vi.fn(async () => Response.json({ Answer: [{ type: 16, data: `"v=DKIM1; k=rsa; p=${key.publicBase64}"` }] }));
     vi.stubGlobal("fetch", fetchMock);
     try {
-      await handleEmail(mail(raw).message, env(), { now: () => NOW });
+      await handleEmail(mail(raw).message, env(), ctxOf, { now: () => NOW });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -291,13 +299,13 @@ describe("email handler", () => {
 });
 
 describe("payment registered after the transfer", () => {
-  const link = (id: string, cents = 1400) => autoLinkPayment({ DB: asD1(db) }, id, cents, NOW.toISOString());
+  const link = (id: string, cents = 1400) => autoLinkPayment(h.a.db, id, cents, NOW.toISOString());
 
   it("links the stored movement to the payment and moves it to recibido", async () => {
     await run(mail(await signMessage(key, mime(), TEXT)));
     expect(movements()[0]).toMatchObject({ match_status: "unmatched", payment_id: null });
 
-    const id = seedPayment(db, { parentName: "Lucia Anais Torres", surnames: ["Perez"], createdAt: "2026-11-26T16:00:00.000Z" });
+    const id = seedPayment({ parentName: "Lucia Anais Torres", surnames: ["Perez"], createdAt: "2026-11-26T16:00:00.000Z" });
     await link(id);
     expect(movements()[0]).toMatchObject({ match_status: "auto", payment_id: id });
     expect(db.sqlite.prepare("SELECT status, reviewed_by FROM payments WHERE id = ?").get(id)).toMatchObject({ status: "recibido", reviewed_by: "deuna" });
@@ -306,7 +314,7 @@ describe("payment registered after the transfer", () => {
 
   it("leaves everything alone when the name does not fit", async () => {
     await run(mail(await signMessage(key, mime(), TEXT)));
-    const id = seedPayment(db, { parentName: "Familia Castro", surnames: ["Castro"] });
+    const id = seedPayment({ parentName: "Familia Castro", surnames: ["Castro"] });
     await link(id);
     expect(movements()[0]).toMatchObject({ match_status: "unmatched", payment_id: null });
     expect(db.sqlite.prepare("SELECT status FROM payments WHERE id = ?").get(id)).toMatchObject({ status: "en_revision" });
@@ -314,8 +322,8 @@ describe("payment registered after the transfer", () => {
 
   it("does not link when two payments from similar families compete for the movement", async () => {
     await run(mail(await signMessage(key, mime(), TEXT)));
-    seedPayment(db, { parentName: "Lucia Anais Torres", createdAt: "2026-11-26T16:00:00.000Z" });
-    const second = seedPayment(db, { parentName: "Anais Torres Mendez", createdAt: "2026-11-26T16:01:00.000Z" });
+    seedPayment({ parentName: "Lucia Anais Torres", createdAt: "2026-11-26T16:00:00.000Z" });
+    const second = seedPayment({ parentName: "Anais Torres Mendez", createdAt: "2026-11-26T16:01:00.000Z" });
     await link(second);
     expect(movements()[0]).toMatchObject({ match_status: "unmatched", payment_id: null });
   });
@@ -329,7 +337,7 @@ describe("payment registered after the transfer", () => {
 
   it("does not touch a payment that is already pagado", async () => {
     await run(mail(await signMessage(key, mime(), TEXT)));
-    const id = seedPayment(db, { parentName: "Lucia Anais Torres", status: "pagado", createdAt: "2026-11-26T16:00:00.000Z" });
+    const id = seedPayment({ parentName: "Lucia Anais Torres", status: "pagado", createdAt: "2026-11-26T16:00:00.000Z" });
     await link(id);
     expect(movements()[0]).toMatchObject({ match_status: "unmatched" });
   });

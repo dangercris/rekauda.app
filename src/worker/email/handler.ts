@@ -8,6 +8,8 @@
 import PostalMime from "postal-mime";
 import type { DeunaImportResult } from "../../shared/api";
 import { TREASURY } from "../constants";
+import type { RequestContext } from "../context";
+import type { SingleEnv } from "../env";
 import { insertMovement } from "../movements";
 import { autoLinkMovement } from "./auto-link";
 import { verifyDkim, type DkimResult } from "./dkim";
@@ -17,7 +19,7 @@ export const DEUNA_SENDER = "notificaciones@deunaapp.com";
 export const DEUNA_DOMAIN = "deunaapp.com";
 export const MAX_RAW_BYTES = 1024 * 1024;
 
-type EmailEnv = Pick<Env, "DB" | "FORWARD_TO">;
+type EmailEnv = Pick<SingleEnv, "FORWARD_TO">;
 
 export interface EmailDeps {
   verify?: (raw: Uint8Array) => Promise<DkimResult>;
@@ -61,7 +63,10 @@ async function readRaw(message: ForwardableEmailMessage): Promise<Uint8Array | n
   return bytes;
 }
 
-export async function handleEmail(message: ForwardableEmailMessage, env: EmailEnv, deps: EmailDeps = {}): Promise<void> {
+/** Resolves the tenant context lazily, AFTER the forward: a database problem must never stop the mail reaching the treasurer. */
+export type ContextProvider = () => Promise<RequestContext | null>;
+
+export async function handleEmail(message: ForwardableEmailMessage, env: EmailEnv, getContext: ContextProvider, deps: EmailDeps = {}): Promise<void> {
   // 1. Buffer the raw stream BEFORE forwarding: it is not guaranteed to be readable afterwards.
   let raw: Uint8Array | null = null;
   try {
@@ -80,7 +85,12 @@ export async function handleEmail(message: ForwardableEmailMessage, env: EmailEn
   // 3. Process the buffered bytes. Any failure is logged and swallowed: the mail was already forwarded.
   if (!raw) return;
   try {
-    await processDeunaRaw(raw, env, deps);
+    const rc = await getContext();
+    if (!rc) {
+      log("deuna_mail_ignored", { reason: "no_tenant" });
+      return;
+    }
+    await processDeunaRaw(raw, rc, deps);
   } catch (e) {
     log("deuna_mail_error", { error: errorText(e) });
   }
@@ -91,7 +101,7 @@ export async function handleEmail(message: ForwardableEmailMessage, env: EmailEn
  * admin .eml import, so both have the same security model: only a passing DKIM signature from deunaapp.com counts.
  * It logs as before and returns what happened; it throws only on unexpected failures (e.g. the database).
  */
-export async function processDeunaRaw(raw: Uint8Array, env: Pick<Env, "DB">, deps: EmailDeps = {}): Promise<DeunaImportResult> {
+export async function processDeunaRaw(raw: Uint8Array, { db }: Pick<RequestContext, "db">, deps: EmailDeps = {}): Promise<DeunaImportResult> {
   if (raw.byteLength > MAX_RAW_BYTES) {
     log("deuna_mail_ignored", { reason: "too_large", size: raw.byteLength });
     return { status: "ignored", reason: "too_large" };
@@ -131,16 +141,17 @@ export async function processDeunaRaw(raw: Uint8Array, env: Pick<Env, "DB">, dep
   }
 
   const now = (deps.now?.() ?? new Date()).toISOString();
-  const movementId = await insertMovement(env, parsed, email.messageId ?? null, now);
+  const movementId = await insertMovement(db, parsed, email.messageId ?? null, now);
   if (!movementId) {
     log("deuna_mail_duplicate", { transaction: parsed.transactionNumber });
-    const existing = await env.DB.prepare("SELECT id FROM bank_movements WHERE transaction_number = ?")
+    const existing = await db
+      .prepare("SELECT id FROM bank_movements WHERE tenant_id = ?1 AND transaction_number = ?2")
       .bind(parsed.transactionNumber)
       .first<{ id: string }>();
     return { status: "duplicate", movementId: existing?.id ?? "" };
   }
   log("deuna_mail_stored", { transaction: parsed.transactionNumber, amountCents: parsed.amountCents });
 
-  const paymentId = await autoLinkMovement(env, movementId, parsed, now);
+  const paymentId = await autoLinkMovement(db, movementId, parsed, now);
   return paymentId ? { status: "stored", movementId, matched: true, paymentId } : { status: "stored", movementId, matched: false };
 }

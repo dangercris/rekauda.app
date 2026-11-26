@@ -48,5 +48,13 @@ export function spyOnDb(real: TestDb) {
         assertTenantScoped(sql);
       }
     },
+    /** For tests that act as several tenants: every statement is bound to one of them and passes the scope checker. */
+    assertAllScopedForAny(tenantIds: string[]): void {
+      if (statements.length === 0) throw new Error("no statements were recorded");
+      for (const { sql, params } of statements) {
+        if (typeof params[0] !== "string" || !tenantIds.includes(params[0])) throw new Error(`statement bound to an unexpected tenant: ${sql}`);
+        assertTenantScoped(sql);
+      }
+    },
   };
 }

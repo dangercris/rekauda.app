@@ -42,6 +42,40 @@ function insertTenant(raw: TestDb, id: string, slug: string, hostnames: string[]
 const tenantA: Tenant = { id: TENANT_A, slug: "demo-a", r2Prefix: `t/${TENANT_A}/`, source: "cloud" };
 const tenantB: Tenant = { id: TENANT_B, slug: "demo-b", r2Prefix: `t/${TENANT_B}/`, source: "cloud" };
 
+describe("HostTenantResolver read-amplification guard", () => {
+  const make = (beforeLookup: () => Promise<void>) => {
+    const { stats, platform } = counting(createCloudTestDb({ seed: true }));
+    return { stats, resolver: new HostTenantResolver(platform, "localhost", new TtlCache(), beforeLookup) };
+  };
+
+  it("runs the hook once per uncached lookup and never for cache hits", async () => {
+    let calls = 0;
+    const { resolver, stats } = make(async () => void (calls += 1));
+    await resolver.resolve("demo-a.localhost");
+    await resolver.resolve("demo-a.localhost");
+    await resolver.resolve("nobody.localhost");
+    await resolver.resolve("nobody.localhost");
+    expect([calls, stats.prepares]).toEqual([2, 2]);
+  });
+
+  it("rejects malformed, apex and reserved hosts before the hook and before any database read", async () => {
+    let calls = 0;
+    const { resolver, stats } = make(async () => void (calls += 1));
+    for (const host of ["", "bad host", "localhost", "www.localhost", "admin.localhost", "a.b.localhost", "x..localhost"]) {
+      expect(await resolver.resolve(host)).toBeNull();
+    }
+    expect([calls, stats.prepares]).toEqual([0, 0]);
+  });
+
+  it("reads nothing when the hook refuses (rate limited) and lets the error through", async () => {
+    const { resolver, stats } = make(async () => {
+      throw new Error("rate limited");
+    });
+    await expect(resolver.resolve("demo-a.localhost")).rejects.toThrow("rate limited");
+    expect(stats.prepares).toBe(0);
+  });
+});
+
 describe("HostTenantResolver", () => {
   const make = (raw = createCloudTestDb({ seed: true }), cache?: TtlCache<Tenant>) => {
     const { stats, platform } = counting(raw);
@@ -176,12 +210,27 @@ describe("SingleTenantResolver", () => {
     expect(await new SingleTenantResolver(counting(raw).platform).resolve("h")).toBeNull();
   });
 
-  it("stops serving on the same resolver as soon as a cloud tenant appears (no stale cache)", async () => {
+  it("caches the positive result for 15 s, then honours a cloud tenant that appeared", async () => {
     const raw = createCloudTestDb();
-    const resolver = new SingleTenantResolver(counting(raw).platform, () => 0);
+    let clock = 0;
+    const { stats, platform } = counting(raw);
+    const resolver = new SingleTenantResolver(platform, () => clock);
     expect((await resolver.resolve("h"))?.id).toBe(SELF_HOST_TENANT_ID);
+    const afterFirst = stats.prepares;
     insertTenant(raw, "c6000000-0000-4000-8000-000000000006", "cloud-y", []);
+    clock = 14_999;
+    expect((await resolver.resolve("h"))?.id).toBe(SELF_HOST_TENANT_ID);
+    expect(stats.prepares).toBe(afterFirst);
+    clock = 15_001;
     expect(await resolver.resolve("h")).toBeNull();
+  });
+
+  it("does not cache a null result: the next request re-checks", async () => {
+    const raw = createCloudTestDb({ seed: true });
+    const resolver = new SingleTenantResolver(counting(raw).platform, () => 0);
+    expect(await resolver.resolve("h")).toBeNull();
+    raw.sqlite.exec("DELETE FROM sessions; DELETE FROM magic_links; DELETE FROM memberships; DELETE FROM tenant_domains; DELETE FROM collections; DELETE FROM tenants");
+    expect((await resolver.resolve("h"))?.id).toBe(SELF_HOST_TENANT_ID);
   });
 
   it("throws instead of skipping silently when provisioning cannot create its rows", async () => {

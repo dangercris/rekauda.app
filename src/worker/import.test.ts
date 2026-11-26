@@ -1,20 +1,13 @@
-import { timingSafeEqual } from "node:crypto";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminMovementImportResponse } from "../shared/api";
 import { adminRoute } from "./admin";
-import { hmac } from "./auth";
 import { processDeunaRaw } from "./email/handler";
-import { asD1, createTestDb, seedPayment, type TestDb } from "./test/d1";
+import type { TestDb } from "./test/d1";
+import { TENANT_A } from "./test/d1-cloud";
+import { ADMIN_AUTH, adminCookie, createHarness, seedPaymentFor, type Harness } from "./test/harness";
 import { generateKey, signMessage, type TestKey } from "./test/sign";
 
-if (!("timingSafeEqual" in crypto.subtle)) {
-  Object.defineProperty(crypto.subtle, "timingSafeEqual", {
-    value: (a: ArrayBuffer, b: ArrayBuffer) => timingSafeEqual(new Uint8Array(a), new Uint8Array(b)),
-  });
-}
-
 const ORIGIN = "https://rekauda.test";
-const SECRET = "test-session-secret";
 
 const TEXT = `Hola, Ana
 Recibiste $14,00 de Torres Mendez Lucia Ana con Deuna!
@@ -39,6 +32,7 @@ const headers = (from = "Deuna <notificaciones@deunaapp.com>"): Array<[string, s
   ["Content-Transfer-Encoding", "8bit"],
 ];
 
+let h: Harness;
 let db: TestDb;
 let key: TestKey;
 let cookie = "";
@@ -51,10 +45,6 @@ function stubDns(publicKey: TestKey | null): void {
   );
 }
 
-function env(): Env {
-  return { DB: asD1(db), ADMIN_PASSWORD: "pw", SESSION_SECRET: SECRET, FORWARD_TO: "x@example.test" } as unknown as Env;
-}
-
 async function upload(content: string | Uint8Array, options: { session?: boolean; field?: string } = {}): Promise<Response> {
   const form = new FormData();
   form.set(options.field ?? "eml", new File([typeof content === "string" ? content : new Uint8Array(content)], "mail.eml", { type: "message/rfc822" }));
@@ -64,7 +54,7 @@ async function upload(content: string | Uint8Array, options: { session?: boolean
   if (options.session !== false) reqHeaders.set("cookie", cookie);
   const request = new Request(`${ORIGIN}/api/admin/movements/import`, { method: "POST", headers: reqHeaders, body });
   try {
-    return await adminRoute(request, env(), new URL(request.url));
+    return await adminRoute(request, h.a, ADMIN_AUTH, new URL(request.url));
   } catch (e) {
     const status = (e as { status?: number }).status;
     if (typeof status === "number") return Response.json({ error: (e as { code?: string }).code }, { status });
@@ -79,9 +69,9 @@ beforeAll(async () => {
   key = await generateKey();
 });
 beforeEach(async () => {
-  db = createTestDb();
-  const exp = Math.floor(Date.now() / 1000) + 600;
-  cookie = `adm=${exp}.${await hmac(SECRET, `adm:${exp}`)}`;
+  h = createHarness();
+  db = h.raw;
+  cookie = await adminCookie();
   logs = [];
   stubDns(key);
   vi.spyOn(console, "log").mockImplementation((line: unknown) => {
@@ -92,6 +82,8 @@ beforeEach(async () => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  // Every statement of every test in this file ran as tenant A and passed the scope checker (tests that never reach the database record none).
+  if (h.spy.statements.length > 0) h.spy.assertAllScoped(TENANT_A);
 });
 
 describe("POST /api/admin/movements/import", () => {
@@ -107,11 +99,11 @@ describe("POST /api/admin/movements/import", () => {
 
   it("rejects a cross-origin upload", async () => {
     const request = new Request(`${ORIGIN}/api/admin/movements/import`, { method: "POST", headers: { origin: "https://evil.test", cookie } });
-    await expect(adminRoute(request, env(), new URL(request.url))).rejects.toMatchObject({ status: 403 });
+    await expect(adminRoute(request, h.a, ADMIN_AUTH, new URL(request.url))).rejects.toMatchObject({ status: 403 });
   });
 
   it("stores a DKIM-valid notification (folded SES-style signature) and links it, answering with the payment code", async () => {
-    const id = seedPayment(db, { parentName: "Lucia Anais Torres", createdAt: "2026-11-25T20:00:00.000Z" });
+    const id = seedPaymentFor(db, TENANT_A, { parentName: "Lucia Anais Torres", createdAt: "2026-11-25T20:00:00.000Z" }).id;
     const code = (db.sqlite.prepare("SELECT code FROM payments WHERE id = ?").get(id) as { code: string }).code;
     const raw = await signMessage(key, headers(), TEXT, { fold: true });
     const response = await upload(raw);
@@ -171,7 +163,7 @@ describe("processDeunaRaw", () => {
   it("accepts a folded SES-style signature (h= and tags over several lines)", async () => {
     const raw = await signMessage(key, headers(), TEXT, { fold: true });
     expect(raw).toMatch(/DKIM-Signature:[^]*?;\r\n\t/);
-    const outcome = await processDeunaRaw(new TextEncoder().encode(raw), { DB: asD1(db) });
+    const outcome = await processDeunaRaw(new TextEncoder().encode(raw), h.a);
     expect(outcome).toMatchObject({ status: "stored", matched: false });
   });
 
@@ -181,7 +173,7 @@ describe("processDeunaRaw", () => {
     const extra = (await signMessage(other, headers(), TEXT, { selector: "s2" })).split("\r\n")[0] ?? "";
     // Two signatures that both fail: the first uses the wrong key for s2, the second is tampered.
     const raw = `${extra}\r\n${good}`.replace("de Torres", "de Otra");
-    const outcome = await processDeunaRaw(new TextEncoder().encode(raw), { DB: asD1(db) });
+    const outcome = await processDeunaRaw(new TextEncoder().encode(raw), h.a);
     expect(outcome.status).toBe("ignored");
     if (outcome.status === "ignored") expect(outcome.signatures).toHaveLength(2);
   });

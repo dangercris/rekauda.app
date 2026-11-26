@@ -8,6 +8,8 @@ import type {
   CollectionsResponse,
   PaymentStatus,
 } from "../shared/api";
+import type { TenantDb } from "./data/tenant-db";
+import type { RequestContext } from "./context";
 import { coverUrl } from "./covers";
 import { HttpError, json } from "./http";
 import { isPublicRow, type CollectionRow, type PublicCollectionRow, type StudentStatusRow } from "./rows";
@@ -53,7 +55,7 @@ export function activeDeunaLink(row: Pick<CollectionRow, "deuna_link" | "deuna_l
   return row.deuna_link;
 }
 
-export function collectionDetailView(row: PublicCollectionRow, now: Date = new Date()): CollectionDetail {
+export function collectionDetailView(row: PublicCollectionRow, r2Prefix: string, now: Date = new Date()): CollectionDetail {
   return {
     slug: row.slug,
     title: row.title,
@@ -65,14 +67,17 @@ export function collectionDetailView(row: PublicCollectionRow, now: Date = new D
     maxPerPayment: row.max_per_payment,
     options: parseOptions(row.options_json),
     tone: row.tone,
-    coverUrl: coverUrl(row.cover_key),
+    coverUrl: coverUrl(row.cover_key, r2Prefix),
     deunaLink: activeDeunaLink(row, now),
   };
 }
 
 /** Public lookup by slug: archived collections do not exist for the public. */
-export async function findPublicCollection(env: Env, slug: string): Promise<PublicCollectionRow> {
-  const row = await env.DB.prepare("SELECT * FROM collections WHERE slug = ? AND status != 'archivada'").bind(slug).first<CollectionRow>();
+export async function findPublicCollection(db: TenantDb, slug: string): Promise<PublicCollectionRow> {
+  const row = await db
+    .prepare("SELECT * FROM collections WHERE tenant_id = ?1 AND slug = ?2 AND status != 'archivada'")
+    .bind(slug)
+    .first<CollectionRow>();
   if (!row || !isPublicRow(row)) throw new HttpError(404, "collection_not_found", "No encontramos esta recaudación.");
   return row;
 }
@@ -97,13 +102,16 @@ export function dedupeStudents(rows: StudentStatusRow[]): Map<string, DedupedStu
   return new Map([...byCollection].map(([id, students]) => [id, [...students.values()]]));
 }
 
-export async function listCollections(env: Env): Promise<Response> {
-  const { results: rows } = await env.DB.prepare("SELECT * FROM collections WHERE status != 'archivada'").all<CollectionRow>();
-  const { results: studentRows } = await env.DB.prepare(
-    `SELECT p.collection_id, s.given_names, s.surnames, s.option_key, p.status
-       FROM students s JOIN payments p ON p.id = s.payment_id
-      WHERE p.status != 'anulado'`,
-  ).all<StudentStatusRow>();
+export async function listCollections({ db, tenant }: RequestContext): Promise<Response> {
+  const { results: rows } = await db.prepare("SELECT * FROM collections WHERE tenant_id = ?1 AND status != 'archivada'").bind().all<CollectionRow>();
+  const { results: studentRows } = await db
+    .prepare(
+      `SELECT p.collection_id, s.given_names, s.surnames, s.option_key, p.status
+         FROM students s JOIN payments p ON p.id = s.payment_id AND p.tenant_id = ?1
+        WHERE s.tenant_id = ?1 AND p.status != 'anulado'`,
+    )
+    .bind()
+    .all<StudentStatusRow>();
   const deduped = dedupeStudents(studentRows);
 
   const collections = rows
@@ -124,23 +132,24 @@ export async function listCollections(env: Env): Promise<Response> {
         registered: students.length,
         paid: students.filter((s) => s.status === "pagado").length,
         tone: row.tone,
-        coverUrl: coverUrl(row.cover_key),
+        coverUrl: coverUrl(row.cover_key, tenant.r2Prefix),
       };
     });
   return json({ collections } satisfies CollectionsResponse);
 }
 
-export async function collectionDetail(env: Env, slug: string): Promise<Response> {
-  return json(collectionDetailView(await findPublicCollection(env, slug)) satisfies CollectionDetail);
+export async function collectionDetail({ db, tenant }: RequestContext, slug: string): Promise<Response> {
+  return json(collectionDetailView(await findPublicCollection(db, slug), tenant.r2Prefix) satisfies CollectionDetail);
 }
 
-export async function collectionBoard(env: Env, slug: string): Promise<Response> {
-  const collection = await findPublicCollection(env, slug);
-  const { results } = await env.DB.prepare(
-    `SELECT p.collection_id, s.given_names, s.surnames, s.option_key, p.status
-       FROM students s JOIN payments p ON p.id = s.payment_id
-      WHERE p.collection_id = ? AND p.status != 'anulado'`,
-  )
+export async function collectionBoard({ db }: RequestContext, slug: string): Promise<Response> {
+  const collection = await findPublicCollection(db, slug);
+  const { results } = await db
+    .prepare(
+      `SELECT p.collection_id, s.given_names, s.surnames, s.option_key, p.status
+         FROM students s JOIN payments p ON p.id = s.payment_id AND p.tenant_id = ?1
+        WHERE s.tenant_id = ?1 AND p.collection_id = ?2 AND p.status != 'anulado'`,
+    )
     .bind(collection.id)
     .all<StudentStatusRow>();
 

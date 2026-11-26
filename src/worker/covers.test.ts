@@ -9,15 +9,23 @@ describe("cover keys", () => {
     expect(coverKey(ID, "b54c12801dcd129e99999999", "png")).toBe(`covers/${ID}/${HASH}.png`);
   });
 
-  it("coverUrl strips the covers/ prefix, or is null", () => {
-    expect(coverUrl(`covers/${ID}/${HASH}.webp`)).toBe(`/api/covers/${ID}/${HASH}.webp`);
-    expect(coverUrl(null)).toBeNull();
-    expect(coverUrl(`receipts/${ID}.jpg`)).toBeNull();
+  it("coverUrl strips the tenant prefix and covers/, or is null", () => {
+    const prefix = "t/a0000000-0000-4000-8000-00000000000a/";
+    expect(coverUrl(`${prefix}covers/${ID}/${HASH}.webp`, prefix)).toBe(`/api/covers/${ID}/${HASH}.webp`);
+    expect(coverUrl(`covers/${ID}/${HASH}.webp`, "")).toBe(`/api/covers/${ID}/${HASH}.webp`);
+    expect(coverUrl(null, prefix)).toBeNull();
+    expect(coverUrl(`${prefix}receipts/${ID}.jpg`, prefix)).toBeNull();
+  });
+
+  it("coverUrl gives nothing for another tenant's key", () => {
+    const own = "t/a0000000-0000-4000-8000-00000000000a/";
+    const other = "t/b0000000-0000-4000-8000-00000000000b/";
+    expect(coverUrl(`${other}covers/${ID}/${HASH}.png`, own)).toBeNull();
   });
 
   it("coverUrl and coverKeyFromPath round-trip", () => {
     const key = `covers/${ID}/${HASH}.jpg`;
-    const path = coverUrl(key)?.slice("/api/covers/".length) ?? "";
+    const path = coverUrl(key, "")?.slice("/api/covers/".length) ?? "";
     expect(coverKeyFromPath(path)).toEqual({ key, contentType: "image/jpeg" });
   });
 });

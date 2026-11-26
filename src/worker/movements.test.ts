@@ -1,39 +1,20 @@
-import { timingSafeEqual } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminMovementMutationResponse, AdminMovementsResponse, AdminPaymentsResponse } from "../shared/api";
-import { adminRoute } from "./admin";
-import { hmac } from "./auth";
 import { insertMovement, linkMovement } from "./movements";
-import { asD1, createTestDb, seedPayment, type TestDb } from "./test/d1";
+import type { TestDb } from "./test/d1";
+import { TENANT_A } from "./test/d1-cloud";
+import { adminCall, createHarness, seedPaymentFor, type Harness, type SeedPaymentInput } from "./test/harness";
 
-const ORIGIN = "https://rekauda.test";
-const SECRET = "test-session-secret";
+let h: Harness;
 let db: TestDb;
-let cookie = "";
+const seed = (overrides: SeedPaymentInput = {}): string => seedPaymentFor(h.raw, TENANT_A, overrides).id;
 
-function env(): Env {
-  // Only the bindings the admin routes touch are provided.
-  return { DB: asD1(db), ADMIN_PASSWORD: "pw", SESSION_SECRET: SECRET, FORWARD_TO: "x@example.test" } as unknown as Env;
-}
-
-async function call(method: string, path: string, body?: unknown, options: { session?: boolean; origin?: string | null } = {}): Promise<Response> {
-  const headers = new Headers({ "content-type": "application/json" });
-  if (options.session !== false) headers.set("cookie", cookie);
-  if (options.origin !== null) headers.set("origin", options.origin ?? ORIGIN);
-  const request = new Request(`${ORIGIN}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  try {
-    return await adminRoute(request, env(), new URL(request.url));
-  } catch (e) {
-    const status = (e as { status?: number }).status;
-    const code = (e as { code?: string }).code;
-    if (typeof status === "number") return Response.json({ error: code }, { status });
-    throw e;
-  }
-}
+const call = (method: string, path: string, body?: unknown, options: { session?: boolean; origin?: string | null } = {}) =>
+  adminCall(h.a, method, path, body, options);
 
 async function addMovement(overrides: Partial<{ tx: string; amount: number }> = {}): Promise<string> {
   const id = await insertMovement(
-    { DB: asD1(db) },
+    h.a.db,
     {
       transactionNumber: overrides.tx ?? "111111111111",
       amountCents: overrides.amount ?? 1400,
@@ -51,20 +32,16 @@ async function addMovement(overrides: Partial<{ tx: string; amount: number }> = 
   return id;
 }
 
-// Workers expose crypto.subtle.timingSafeEqual, Node does not.
-if (!("timingSafeEqual" in crypto.subtle)) {
-  Object.defineProperty(crypto.subtle, "timingSafeEqual", {
-    value: (a: ArrayBuffer, b: ArrayBuffer) => timingSafeEqual(new Uint8Array(a), new Uint8Array(b)),
-  });
-}
-
-beforeEach(async () => {
-  db = createTestDb();
-  const exp = Math.floor(Date.now() / 1000) + 600;
-  cookie = `adm=${exp}.${await hmac(SECRET, `adm:${exp}`)}`;
+beforeEach(() => {
+  h = createHarness();
+  db = h.raw;
   vi.spyOn(console, "log").mockImplementation(() => undefined);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  // Every statement of every test in this file ran as tenant A and passed the scope checker.
+  h.spy.assertAllScoped(TENANT_A);
+});
 
 describe("insertMovement", () => {
   it("is idempotent on transaction_number", async () => {
@@ -88,8 +65,8 @@ describe("linkMovement guards", () => {
   it("does not auto-link a payment that became anulado or pagado after it was loaded", async () => {
     const movementId = await addMovement();
     for (const status of ["anulado", "pagado"] as const) {
-      const paymentId = seedPayment(db, { status });
-      expect(await linkMovement({ DB: asD1(db) }, input(movementId, paymentId))).toBe(false);
+      const paymentId = seed({ status });
+      expect(await linkMovement(h.a.db, input(movementId, paymentId))).toBe(false);
       expect(state(paymentId)).toMatchObject({ status, reviewed_by: null });
     }
     expect(db.sqlite.prepare("SELECT payment_id, match_status FROM bank_movements").get()).toMatchObject({ payment_id: null, match_status: "unmatched" });
@@ -97,10 +74,10 @@ describe("linkMovement guards", () => {
 
   it("never modifies a payment when the movement was linked elsewhere first", async () => {
     const movementId = await addMovement();
-    const first = seedPayment(db);
-    const second = seedPayment(db);
-    expect(await linkMovement({ DB: asD1(db) }, input(movementId, first))).toBe(true);
-    expect(await linkMovement({ DB: asD1(db) }, input(movementId, second))).toBe(false);
+    const first = seed();
+    const second = seed();
+    expect(await linkMovement(h.a.db, input(movementId, first))).toBe(true);
+    expect(await linkMovement(h.a.db, input(movementId, second))).toBe(false);
     expect(state(second)).toMatchObject({ status: "en_revision", reviewed_by: null });
     expect(db.sqlite.prepare("SELECT payment_id FROM bank_movements").get()).toMatchObject({ payment_id: first });
   });
@@ -108,9 +85,9 @@ describe("linkMovement guards", () => {
   it("rolls the whole batch back when the payment already has another movement", async () => {
     const a = await addMovement({ tx: "1" + "0".repeat(11) });
     const b = await addMovement({ tx: "2" + "0".repeat(11) });
-    const paymentId = seedPayment(db);
-    expect(await linkMovement({ DB: asD1(db) }, input(a, paymentId))).toBe(true);
-    await expect(linkMovement({ DB: asD1(db) }, input(b, paymentId))).rejects.toThrow(/UNIQUE/i);
+    const paymentId = seed();
+    expect(await linkMovement(h.a.db, input(a, paymentId))).toBe(true);
+    await expect(linkMovement(h.a.db, input(b, paymentId))).rejects.toThrow(/UNIQUE/i);
     expect(db.sqlite.prepare("SELECT match_status FROM bank_movements WHERE id = ?").get(b)).toMatchObject({ match_status: "unmatched" });
   });
 });
@@ -137,7 +114,7 @@ describe("admin movements API", () => {
 
   it("links manually: payment becomes recibido with the Deuna note, and the list shows the movement", async () => {
     const movementId = await addMovement();
-    const paymentId = seedPayment(db, { status: "observado" });
+    const paymentId = seed({ status: "observado" });
     const response = await call("POST", `/api/admin/movements/${movementId}/link`, { paymentId });
     expect(response.status).toBe(200);
     const body = (await response.json()) as AdminMovementMutationResponse;
@@ -160,7 +137,7 @@ describe("admin movements API", () => {
 
   it("does not touch the status of a pagado payment when linking", async () => {
     const movementId = await addMovement();
-    const paymentId = seedPayment(db, { status: "pagado" });
+    const paymentId = seed({ status: "pagado" });
     expect((await call("POST", `/api/admin/movements/${movementId}/link`, { paymentId })).status).toBe(200);
     expect(db.sqlite.prepare("SELECT status, reviewed_by FROM payments WHERE id = ?").get(paymentId)).toMatchObject({ status: "pagado", reviewed_by: null });
   });
@@ -168,11 +145,11 @@ describe("admin movements API", () => {
   it("answers 409 when the payment or the movement is already linked, and for anulado payments", async () => {
     const first = await addMovement({ tx: "1" + "0".repeat(11) });
     const second = await addMovement({ tx: "2" + "0".repeat(11) });
-    const paymentId = seedPayment(db);
+    const paymentId = seed();
     expect((await call("POST", `/api/admin/movements/${first}/link`, { paymentId })).status).toBe(200);
     expect((await call("POST", `/api/admin/movements/${second}/link`, { paymentId })).status).toBe(409);
-    expect((await call("POST", `/api/admin/movements/${first}/link`, { paymentId: seedPayment(db) })).status).toBe(409);
-    expect((await call("POST", `/api/admin/movements/${second}/link`, { paymentId: seedPayment(db, { status: "anulado" }) })).status).toBe(409);
+    expect((await call("POST", `/api/admin/movements/${first}/link`, { paymentId: seed() })).status).toBe(409);
+    expect((await call("POST", `/api/admin/movements/${second}/link`, { paymentId: seed({ status: "anulado" }) })).status).toBe(409);
   });
 
   it("validates the body and the ids", async () => {
@@ -184,7 +161,7 @@ describe("admin movements API", () => {
 
   it("unlinks (payment keeps its status, movement is unmatched again) and ignores", async () => {
     const movementId = await addMovement();
-    const paymentId = seedPayment(db);
+    const paymentId = seed();
     await call("POST", `/api/admin/movements/${movementId}/link`, { paymentId });
     expect((await call("POST", `/api/admin/movements/${movementId}/ignore`, {})).status).toBe(409);
 
