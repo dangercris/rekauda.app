@@ -35,7 +35,9 @@
     "binding": "ASSETS",
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/r/*"]
+    // The Worker answers every HTML entry (/, /admin, /r/*, index.html, admin.html) so it can inline the tenant's
+    // config (src/worker/boot.ts). Hashed bundles and icon.svg stay static. Exclusions are exact names on purpose: `*` crosses slashes, so a pattern like `!/*.png` would also exclude /api/assets/deuna-qr.png. Verify the "!" exclusions in the sandbox.
+    "run_worker_first": ["/*", "!/assets/*", "!/icon.svg"]
   },
 
   "d1_databases": [

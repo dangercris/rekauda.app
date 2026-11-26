@@ -1,5 +1,5 @@
 import type { CollectionStatus } from "../../../shared/api";
-import { CLASS_SHORT_NAME } from "../../../shared/instance";
+import { CLASS_SHORT_NAME } from "../../../shared/instance-bundled";
 import { cx } from "../../lib/cx";
 import { Button, EmptyState, Icon, IconButton, Skeleton, type IconName } from "../../ui";
 import styles from "./common.module.css";

@@ -7,7 +7,6 @@
  */
 import PostalMime from "postal-mime";
 import type { DeunaImportResult } from "../../shared/api";
-import { TREASURY } from "../constants";
 import type { RequestContext } from "../context";
 import type { SingleEnv } from "../env";
 import { insertMovement } from "../movements";
@@ -101,7 +100,7 @@ export async function handleEmail(message: ForwardableEmailMessage, env: EmailEn
  * admin .eml import, so both have the same security model: only a passing DKIM signature from deunaapp.com counts.
  * It logs as before and returns what happened; it throws only on unexpected failures (e.g. the database).
  */
-export async function processDeunaRaw(raw: Uint8Array, { db }: Pick<RequestContext, "db">, deps: EmailDeps = {}): Promise<DeunaImportResult> {
+export async function processDeunaRaw(raw: Uint8Array, { db, config }: Pick<RequestContext, "db" | "config">, deps: EmailDeps = {}): Promise<DeunaImportResult> {
   if (raw.byteLength > MAX_RAW_BYTES) {
     log("deuna_mail_ignored", { reason: "too_large", size: raw.byteLength });
     return { status: "ignored", reason: "too_large" };
@@ -134,7 +133,7 @@ export async function processDeunaRaw(raw: Uint8Array, { db }: Pick<RequestConte
   }
   const parsed = parse.payment;
 
-  const lastDigits = TREASURY.accountNumber.slice(-4);
+  const lastDigits = config.treasury.accountNumber.slice(-4);
   if (!parsed.destinationAccount.endsWith(lastDigits)) {
     log("deuna_mail_wrong_account", { transaction: parsed.transactionNumber });
     return { status: "ignored", reason: "wrong_account" };

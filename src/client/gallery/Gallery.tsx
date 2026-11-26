@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { PaymentStatus } from "../../shared/api";
 import { PAYMENT_STATUSES } from "../../shared/api";
-import { CLASS_MARK, CLASS_SHORT_NAME, TREASURY } from "../../shared/instance";
+import { CLASS_MARK, CLASS_SHORT_NAME, TREASURY } from "../../shared/instance-bundled";
 import {
   EventThemeProvider,
   contrastRatio,

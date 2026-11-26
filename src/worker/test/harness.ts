@@ -5,6 +5,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { adminRoute } from "../admin";
 import { hmac, type AdminAuthConfig } from "../auth";
+import { resolveInstance } from "../../shared/instance";
+import { parseInstanceConfig } from "../../shared/instance-validation";
 import { buildContext, type RequestContext } from "../context";
 import type { Tenant } from "../tenancy/tenant";
 import { asD1, type TestDb } from "./d1";
@@ -26,8 +28,13 @@ export function createHarness() {
   const spy = spyOnDb(raw);
   const bucket = new FakeBucket();
   const bindings = { db: asD1(spy.db), files: asR2(bucket) };
-  const a = buildContext(tenantOf(TENANT_A, "demo-a"), bindings);
-  const b = buildContext(tenantOf(TENANT_B, "demo-b"), bindings);
+  // Each tenant's config is its seeded config_json, parsed with the same rules the D1ConfigStore applies.
+  const configOf = (id: string) => {
+    const row = raw.sqlite.prepare("SELECT config_json FROM tenants WHERE id = ?").get(id) as { config_json: string };
+    return resolveInstance(parseInstanceConfig(JSON.parse(row.config_json), "test tenant"));
+  };
+  const a = buildContext(tenantOf(TENANT_A, "demo-a"), bindings, configOf(TENANT_A));
+  const b = buildContext(tenantOf(TENANT_B, "demo-b"), bindings, configOf(TENANT_B));
   return { raw, spy, bucket, a, b };
 }
 

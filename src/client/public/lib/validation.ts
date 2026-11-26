@@ -3,7 +3,7 @@
  * parseTransferDate, parseAmount, parseReference, parseStudents). Problems are shown on each field before
  * the request is sent; the server stays the source of truth and its message is shown if it still rejects.
  */
-import { EARLIEST_TRANSFER, EARLIEST_TRANSFER_LABEL } from "../../../shared/instance";
+import { EARLIEST_TRANSFER, EARLIEST_TRANSFER_LABEL } from "../../../shared/instance-bundled";
 import { parseAmountCents, todayEc } from "../../lib/format";
 
 /** Same as the worker's cleanText: NFC, control chars to spaces, collapsed whitespace, trimmed. */

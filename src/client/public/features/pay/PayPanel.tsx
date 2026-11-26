@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { CollectionDetail } from "../../../../shared/api";
 import { cx } from "../../../lib/cx";
-import { TREASURY } from "../../../../shared/instance";
+import { TREASURY } from "../../../../shared/instance-bundled";
 import { Stepper } from "../../../ui";
 import { useConfig } from "../../hooks/data";
 import { scrollToTop } from "../../hooks/ui";

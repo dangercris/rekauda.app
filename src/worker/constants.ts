@@ -1,5 +1,3 @@
-export { BANKS, CLASS_NAME, DEFAULT_TONE, EARLIEST_TRANSFER, EARLIEST_TRANSFER_LABEL, SCHOOL_NAME, TREASURY } from "../shared/instance";
-
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_BODY_BYTES = 6 * 1024 * 1024;
 export const MAX_JSON_BYTES = 4096;

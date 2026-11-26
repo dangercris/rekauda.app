@@ -20,6 +20,13 @@ describe("Content-Security-Policy", () => {
     expect(fromWorker).toBe(cspByBlock().global);
   });
 
+  it("is identical in public/_headers (/admin*) and the Worker admin page headers", () => {
+    const admin = withPageHeaders(new Response("<html></html>"), false, true);
+    expect(admin.headers.get("Content-Security-Policy")).toBe(cspByBlock().admin);
+    expect(admin.headers.get("Cache-Control")).toBe("no-store");
+    expect(headersFile).toMatch(/\/admin\*\n\s+! Cache-Control\n\s+Cache-Control: no-store/);
+  });
+
   it("allows exactly what GA4 and Cloudflare Web Analytics need on public pages", () => {
     const csp = cspByBlock().global;
     expect(csp).toContain("script-src 'self' https://www.googletagmanager.com https://static.cloudflareinsights.com;");

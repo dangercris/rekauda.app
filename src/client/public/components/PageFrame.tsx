@@ -4,7 +4,7 @@ import { cx } from "../../lib/cx";
 import { AmbientBackground, BrandPill } from "../../ui";
 import { useConfig } from "../hooks/data";
 import { isAnalyticsEnabled, openPreferences } from "../lib/analytics";
-import { CLASS_MARK } from "../../../shared/instance";
+import { CLASS_MARK } from "../../../shared/instance-bundled";
 import { footerText } from "../lib/identity";
 import styles from "./PageFrame.module.css";
 

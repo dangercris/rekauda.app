@@ -199,7 +199,7 @@ async function pruneOldCards(storage: TenantStorage, slug: string, keep: string)
  */
 export async function serveOgImage(
   request: Request,
-  { db, storage }: RequestContext,
+  { db, storage, config }: RequestContext,
   env: Pick<BaseEnv, "IMAGES">,
   ctx: ExecutionContext,
   url: URL,
@@ -230,7 +230,7 @@ export async function serveOgImage(
     console.error(JSON.stringify({ level: "error", event: "og_cover_failed", slug, message: err instanceof Error ? err.message : String(err) }));
   }
 
-  const { image } = await render(cardTree(buildOgCard(row), cover), { width: OG_WIDTH, height: OG_HEIGHT, fonts: FONTS }).asPng();
+  const { image } = await render(cardTree(buildOgCard(row, config), cover), { width: OG_WIDTH, height: OG_HEIGHT, fonts: FONTS }).asPng();
   const encoded = await encode(env, image);
   // Only JPEGs are stored: a PNG fallback means the Images binding failed, so the next request tries again.
   if (encoded.type === "image/jpeg") {

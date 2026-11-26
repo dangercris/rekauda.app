@@ -1,12 +1,8 @@
-import { CLASS_SHORT_NAME } from "../shared/instance";
-import type { RequestContext } from "./context";
-import type { BaseEnv } from "./env";
 import { OG_HEIGHT, OG_WIDTH, ogVersion } from "./og-card";
-import { isPublicRow, type CollectionRow } from "./rows";
+import type { CollectionRow } from "./rows";
 
-/** Link previews (WhatsApp, Telegram, Facebook...) for `/r/<slug>`: the SPA shell with the collection's meta tags injected. */
+/** Link previews (WhatsApp, Telegram, Facebook...) for `/r/<slug>`: the meta tags. boot.ts injects them into the SPA shell. */
 
-export const SITE_SUFFIX = CLASS_SHORT_NAME;
 const MAX_DESCRIPTION = 160;
 
 export type OgMeta = {
@@ -37,9 +33,10 @@ export function publicOrigin(url: URL): string {
   return local ? url.origin : `https://${url.host}`;
 }
 
-export function buildOgMeta(collection: OgSource, origin: string): OgMeta {
+/** `siteName` is the tenant's short class name (config.classShortName). */
+export function buildOgMeta(collection: OgSource, origin: string, siteName: string): OgMeta {
   return {
-    title: `${collection.title} · ${SITE_SUFFIX}`,
+    title: `${collection.title} · ${siteName}`,
     description: truncateDescription(collection.description),
     url: `${origin}/r/${collection.slug}`,
     image: `${origin}/api/og/${collection.slug}.jpg?v=${ogVersion(collection)}`,
@@ -90,56 +87,24 @@ const PAGE_HEADERS: Record<string, string> = {
   "Cache-Control": "no-cache",
 };
 
+/** Same CSP and caching as the `/admin*` block of public/_headers: no Google, never stored. */
+const ADMIN_HEADERS: Record<string, string> = {
+  ...PAGE_HEADERS,
+  "Content-Security-Policy":
+    "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
+  "Cache-Control": "no-store",
+};
+
 /**
- * Adds the page security headers. When the body was rewritten the validators of the original asset no
+ * Adds the page security headers (the strict admin set when `admin` is true). When the body was rewritten the validators of the original asset no
  * longer describe it, so ETag / Last-Modified are dropped (otherwise a stale 304 could hide the OG tags).
  */
-export function withPageHeaders(response: Response, rewritten = false): Response {
+export function withPageHeaders(response: Response, rewritten = false, admin = false): Response {
   const out = new Response(response.body, response);
-  for (const [name, value] of Object.entries(PAGE_HEADERS)) out.headers.set(name, value);
+  for (const [name, value] of Object.entries(admin ? ADMIN_HEADERS : PAGE_HEADERS)) out.headers.set(name, value);
   if (rewritten) {
     out.headers.delete("ETag");
     out.headers.delete("Last-Modified");
   }
   return out;
-}
-
-/** GET /r/<slug>[/...]: the SPA shell, with preview tags when the slug is a public collection. */
-export async function servePage(request: Request, env: Pick<BaseEnv, "ASSETS">, { db }: RequestContext, url: URL, slug: string): Promise<Response> {
-  if (request.method !== "GET" && request.method !== "HEAD") return env.ASSETS.fetch(request);
-
-  const shell = await env.ASSETS.fetch(new Request(new URL("/", url), { method: request.method, headers: { accept: "text/html" } }));
-  if (!shell.ok || !(shell.headers.get("content-type") ?? "").includes("text/html")) return shell;
-
-  let row: CollectionRow | null;
-  try {
-    row = await db.prepare("SELECT * FROM collections WHERE tenant_id = ?1 AND slug = ?2 AND status != 'archivada'").bind(slug).first<CollectionRow>();
-  } catch (err) {
-    // The preview is an enhancement: serve the plain shell instead of failing the page.
-    console.error(JSON.stringify({ level: "error", event: "og_lookup_failed", slug, message: err instanceof Error ? err.message : String(err) }));
-    return withPageHeaders(shell);
-  }
-  if (!row || !isPublicRow(row)) return withPageHeaders(shell);
-
-  const meta = buildOgMeta(row, publicOrigin(url));
-  const tags = metaTags(meta);
-  const rewritten = new HTMLRewriter()
-    // Drop any static preview tags from the shell so crawlers never see duplicates.
-    .on('meta[name="description"], meta[property^="og:"], meta[name^="twitter:"]', {
-      element(el) {
-        el.remove();
-      },
-    })
-    .on("title", {
-      element(el) {
-        el.setInnerContent(meta.title);
-      },
-    })
-    .on("head", {
-      element(el) {
-        el.append(tags, { html: true });
-      },
-    })
-    .transform(shell);
-  return withPageHeaders(rewritten, true);
 }

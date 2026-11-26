@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TEST_INSTANCE, withInstance } from "./test/config";
 import { buildOgCard, deadlineLabel, ogVersion, rgba, splitMoney, type OgCardSource } from "./og-card";
 
 const row: OgCardSource = {
@@ -43,7 +44,7 @@ describe("ogVersion", () => {
 
 describe("buildOgCard", () => {
   it("builds the single-price card for an open collection", () => {
-    const card = buildOgCard(row);
+    const card = buildOgCard(row, TEST_INSTANCE);
     expect(card).toMatchObject({
       school: "Mi Colegio · 1.º de Básica A",
       eyebrow: "Musical de Navidad",
@@ -66,7 +67,7 @@ describe("buildOgCard", () => {
         { key: "a", label: "A", detail: null, cents: 2500 },
         { key: "b", label: "B", detail: null, cents: 1250 },
       ]),
-    });
+    }, TEST_INSTANCE);
     expect(card.priceWhole).toBe("$12");
     expect(card.priceCents).toBe(",50");
     expect(card.pricePrefix).toBe("Desde");
@@ -74,15 +75,22 @@ describe("buildOgCard", () => {
   });
 
   it("marks closed collections and falls back on bad tones", () => {
-    const card = buildOgCard({ ...row, status: "cerrada", tone: "nope", eyebrow: "  " });
+    const card = buildOgCard({ ...row, status: "cerrada", tone: "nope", eyebrow: "  " }, TEST_INSTANCE);
     expect(card.badge).toBe("Recaudación cerrada");
     expect(card.closed).toBe(true);
     expect(card.eyebrow).toBeNull();
     expect(card.colors.tone).toBe("#C81E3A");
   });
 
+  it("takes school, class and default tone from the config it is given", () => {
+    const other = withInstance({ schoolName: "School B", className: "Class B", defaultTone: "#1E3AC8" });
+    const card = buildOgCard({ ...row, tone: "nope" }, other);
+    expect(card.school).toBe("School B · Class B");
+    expect(card.colors.tone).toBe("#1E3AC8");
+  });
+
   it("uses dark ink on light tones", () => {
-    expect(buildOgCard({ ...row, tone: "#F5D547" }).colors.ink).toBe("#0E1117");
+    expect(buildOgCard({ ...row, tone: "#F5D547" }, TEST_INSTANCE).colors.ink).toBe("#0E1117");
   });
 });
 
