@@ -176,6 +176,60 @@ describe("admin in multi mode", () => {
     expect(login.status).toBe(404);
   });
 
+  it("sends magic links through the send_email binding after answering, from the root domain to the tenant's own host", async () => {
+    const { env } = setup("multi");
+    const sent: Array<Record<string, unknown>> = [];
+    const work: Promise<unknown>[] = [];
+    const multi = { ...env, SEND_EMAIL: { send: async (m: Record<string, unknown>) => void sent.push(m) } } as unknown as CloudEnv;
+    const context = { waitUntil: (p: Promise<unknown>) => void work.push(p), passThroughOnException: () => undefined } as unknown as ExecutionContext;
+    const res = await worker.fetch(
+      new Request("https://demo-a.localhost/api/admin/magic-link", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://demo-a.localhost", "cf-connecting-ip": "203.0.113.1" },
+        body: JSON.stringify({ email: "owner-a@example.test" }),
+      }),
+      multi,
+      context,
+    );
+    await Promise.all(work);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ from: { email: "no-reply@localhost" }, to: "owner-a@example.test" });
+    expect(String(sent[0]?.["text"])).toContain("http://demo-a.localhost/admin#acceso=");
+  });
+
+  it("offers no magic link, and logs why, when the SEND_EMAIL binding is missing", async () => {
+    const { env } = setup("multi");
+    const logs: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((line: unknown) => void logs.push(String(line)));
+    const unbound = { ...env, SEND_EMAIL: undefined } as unknown as CloudEnv;
+    const res = await worker.fetch(
+      new Request("https://demo-a.localhost/api/admin/magic-link", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://demo-a.localhost", "cf-connecting-ip": "203.0.113.1" },
+        body: JSON.stringify({ email: "owner-a@example.test" }),
+      }),
+      unbound,
+      ec,
+    );
+    expect(res.status).toBe(404);
+    expect(logs.some((l) => l.includes("magic_link_not_configured"))).toBe(true);
+  });
+
+  it("offers no magic link in single mode", async () => {
+    const { env } = setup("single");
+    const res = await worker.fetch(
+      new Request("https://anything.example.test/api/admin/magic-link", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://anything.example.test", "cf-connecting-ip": "203.0.113.1" },
+        body: JSON.stringify({ email: "owner-a@example.test" }),
+      }),
+      env,
+      ec,
+    );
+    expect(res.status).toBe(404);
+  });
+
   it("accepts a session of the host's tenant and rejects the same cookie value on another tenant's host", async () => {
     const { env, raw } = setup("multi");
     const cookie = await cloudCookie(raw, TENANT_A, OWNER_A);

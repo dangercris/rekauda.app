@@ -14,7 +14,7 @@ const RAW_NAMES = ["DB", "RECEIPTS", "MAIL_ARCHIVE", "SEND_EMAIL", "D1Database",
 
 /** Files allowed to name a raw binding, and which names each may use. */
 const ALLOWLIST: Record<string, string[]> = {
-  "index.ts": ["DB", "RECEIPTS"],
+  "index.ts": ["DB", "RECEIPTS", "SEND_EMAIL"],
   "env.ts": ["DB", "RECEIPTS", "MAIL_ARCHIVE", "SEND_EMAIL", "D1Database", "R2Bucket"],
   "context.ts": ["D1Database", "R2Bucket"],
   "data/platform-db.ts": ["D1Database"],

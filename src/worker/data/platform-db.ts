@@ -52,6 +52,31 @@ export class PlatformDb {
     return row ? { configJson: row.config_json, qrKey: row.qr_key, updatedAt: row.updated_at } : null;
   }
 
+  /** The person (never the synthetic self-host owner) with this email who holds a membership in this tenant, or null. */
+  async findMemberByEmail(tenantId: string, email: string): Promise<{ userId: string } | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT u.id FROM users u JOIN memberships m ON m.user_id = u.id AND m.tenant_id = ?1
+         WHERE u.email = ?2 AND u.kind = 'person'`,
+      )
+      .bind(tenantId, email)
+      .first<{ id: string }>();
+    return row ? { userId: row.id } : null;
+  }
+
+  /** The hostname of this tenant that matches the (already normalized) request host and is live: a platform subdomain, or a VERIFIED custom domain. Null otherwise. */
+  async findLiveHostname(tenantId: string, hostname: string): Promise<string | null> {
+    const row = await this.db
+      .prepare("SELECT hostname FROM tenant_domains WHERE tenant_id = ?1 AND hostname = ?2 AND (kind = 'subdomain' OR verified_at IS NOT NULL)")
+      .bind(tenantId, hostname)
+      .first<{ hostname: string }>();
+    return row?.hostname ?? null;
+  }
+
+  async recordLogin(userId: string, nowIso: string): Promise<void> {
+    await this.db.prepare("UPDATE users SET last_login_at = ?2 WHERE id = ?1").bind(userId, nowIso).run();
+  }
+
   async findSelfHostTenant(): Promise<Tenant | null> {
     const row = await this.db
       .prepare(

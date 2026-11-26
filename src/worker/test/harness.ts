@@ -3,6 +3,7 @@
  * tenant. Every handler test that goes through a RequestContext should end with spy.assertAllScoped(tenantId).
  */
 import { adminRoute } from "../admin";
+import type { MagicLinkDeps } from "../auth/magic-link";
 import type { PasswordLogin } from "../auth/password";
 import { SESSION_COOKIE, SessionStore } from "../auth/sessions";
 import { resolveInstance } from "../../shared/instance";
@@ -126,15 +127,16 @@ export async function adminCall(
   method: string,
   path: string,
   body?: unknown,
-  options: { session?: boolean; cookie?: string; origin?: string | null; login?: PasswordLogin | null } = {},
+  options: { session?: boolean; cookie?: string; origin?: string | null; login?: PasswordLogin | null; magic?: MagicLinkDeps | null; ip?: string; now?: () => number; base?: string } = {},
 ): Promise<Response> {
   const headers = new Headers({ "content-type": "application/json" });
+  if (options.ip) headers.set("cf-connecting-ip", options.ip);
   if (options.cookie) headers.set("cookie", options.cookie);
   else if (options.session !== false) headers.set("cookie", await adminCookie(rc));
-  if (options.origin !== null) headers.set("origin", options.origin ?? ORIGIN);
-  const request = new Request(`${ORIGIN}${path}`, { method, headers, ...(body === undefined || method === "GET" ? {} : { body: JSON.stringify(body) }) });
+  if (options.origin !== null) headers.set("origin", options.origin ?? new URL(options.base ?? ORIGIN).origin);
+  const request = new Request(`${options.base ?? ORIGIN}${path}`, { method, headers, ...(body === undefined || method === "GET" ? {} : { body: JSON.stringify(body) }) });
   try {
-    return await adminRoute(request, rc, options.login ?? null, new URL(request.url));
+    return await adminRoute(request, rc, options.login ?? null, new URL(request.url), options.now, options.magic ?? null);
   } catch (e) {
     const status = (e as { status?: number }).status;
     if (typeof status === "number") return Response.json({ error: (e as { code?: string }).code }, { status });
