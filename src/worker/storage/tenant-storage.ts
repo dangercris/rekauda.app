@@ -37,8 +37,22 @@ export class TenantStorage {
     return this.bucket.head(this.owned(key));
   }
 
-  async delete(key: string): Promise<void> {
-    return this.bucket.delete(this.owned(key));
+  /** Deletes one or several full keys. Every key is checked first, so one foreign key refuses the whole call. */
+  async delete(key: string | string[]): Promise<void> {
+    return this.bucket.delete(Array.isArray(key) ? key.map((k) => this.owned(k)) : this.owned(key));
+  }
+
+  /** The full key for a tenant-relative key, without touching the bucket. */
+  keyFor(relativeKey: string): string {
+    if (!isRelativeKey(relativeKey)) throw new TenantStorageViolation("invalid storage key");
+    return this.prefix + relativeKey;
+  }
+
+  /** Full keys under a relative prefix such as `og/<slug>/`. The prefix is validated like a key and always lives inside this tenant. */
+  async list(relativePrefix: string): Promise<string[]> {
+    if (!relativePrefix.endsWith("/") || !isRelativeKey(relativePrefix.slice(0, -1))) throw new TenantStorageViolation("invalid storage prefix");
+    const { objects } = await this.bucket.list({ prefix: this.prefix + relativePrefix });
+    return objects.map((o) => o.key);
   }
 
   private owned(key: string): string {

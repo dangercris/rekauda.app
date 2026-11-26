@@ -1,4 +1,6 @@
 import { CLASS_SHORT_NAME } from "../shared/instance";
+import type { RequestContext } from "./context";
+import type { BaseEnv } from "./env";
 import { OG_HEIGHT, OG_WIDTH, ogVersion } from "./og-card";
 import { isPublicRow, type CollectionRow } from "./rows";
 
@@ -103,7 +105,7 @@ export function withPageHeaders(response: Response, rewritten = false): Response
 }
 
 /** GET /r/<slug>[/...]: the SPA shell, with preview tags when the slug is a public collection. */
-export async function servePage(request: Request, env: Env, url: URL, slug: string): Promise<Response> {
+export async function servePage(request: Request, env: Pick<BaseEnv, "ASSETS">, { db }: RequestContext, url: URL, slug: string): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") return env.ASSETS.fetch(request);
 
   const shell = await env.ASSETS.fetch(new Request(new URL("/", url), { method: request.method, headers: { accept: "text/html" } }));
@@ -111,7 +113,7 @@ export async function servePage(request: Request, env: Env, url: URL, slug: stri
 
   let row: CollectionRow | null;
   try {
-    row = await env.DB.prepare("SELECT * FROM collections WHERE slug = ? AND status != 'archivada'").bind(slug).first<CollectionRow>();
+    row = await db.prepare("SELECT * FROM collections WHERE tenant_id = ?1 AND slug = ?2 AND status != 'archivada'").bind(slug).first<CollectionRow>();
   } catch (err) {
     // The preview is an enhancement: serve the plain shell instead of failing the page.
     console.error(JSON.stringify({ level: "error", event: "og_lookup_failed", slug, message: err instanceof Error ? err.message : String(err) }));

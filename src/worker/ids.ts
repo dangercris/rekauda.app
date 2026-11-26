@@ -1,4 +1,5 @@
 /** Identifiers and hashing helpers (all based on Web Crypto). */
+import type { TenantDb } from "./data/tenant-db";
 
 export const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
@@ -14,10 +15,11 @@ export function randomCode(): string {
   return `${out.slice(0, 3).join("")}-${out.slice(3).join("")}`;
 }
 
-export async function uniqueCode(env: Env): Promise<string> {
+/** Codes are unique per tenant: a code taken by another tenant is free here. */
+export async function uniqueCode(db: TenantDb): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = randomCode();
-    const taken = await env.DB.prepare("SELECT 1 FROM payments WHERE code = ?").bind(code).first();
+    const taken = await db.prepare("SELECT 1 FROM payments WHERE tenant_id = ?1 AND code = ?2").bind(code).first();
     if (!taken) return code;
   }
   throw new Error("could not allocate a unique code");

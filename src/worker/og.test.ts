@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { ogVersion } from "./og-card";
+import { buildContext } from "./context";
+import type { BaseEnv } from "./env";
+import { TENANT_A, TENANT_B } from "./test/d1-cloud";
+import { createHarness } from "./test/harness";
+import { FakeBucket, asR2 } from "./test/r2-fake";
 import { buildOgMeta, escapeAttr, metaEntries, metaTags, publicOrigin, servePage, truncateDescription, withPageHeaders } from "./og";
 
 const ID = "c0000000-0000-4000-8000-000000000001";
@@ -101,27 +106,43 @@ describe("withPageHeaders", () => {
 });
 
 describe("servePage", () => {
+  const assets = { ASSETS: { fetch: async () => new Response("<html><head><title>x</title></head></html>", { headers: { "content-type": "text/html" } }) } } as unknown as Pick<BaseEnv, "ASSETS">;
+  const tenant = { id: TENANT_B, slug: "demo-b", r2Prefix: `t/${TENANT_B}/`, source: "cloud" as const };
+
   it("serves the plain shell with page headers when the collection lookup throws", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const env = {
-      ASSETS: { fetch: async () => new Response("<html><head></head></html>", { headers: { "content-type": "text/html" } }) },
-      DB: {
-        prepare: () => ({
-          bind: () => ({
-            first: async () => {
-              throw new Error("D1_ERROR: boom");
-            },
-          }),
+    const failing = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => {
+            throw new Error("D1_ERROR: boom");
+          },
         }),
-      },
-    } as unknown as Env;
-    const url = new URL("https://x.test/r/vestuario-musical");
-    const res = await servePage(new Request(url), env, url, "vestuario-musical");
+      }),
+    } as unknown as D1Database;
+    const rc = buildContext(tenant, { db: failing, files: asR2(new FakeBucket()) });
+    const url = new URL("https://x.test/r/demo-collection");
+    const res = await servePage(new Request(url), assets, rc, url, "demo-collection");
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
     expect(await res.text()).not.toContain("og:title");
     const logged = JSON.parse(String(error.mock.calls[0]?.[0])) as { event: string; slug: string };
-    expect(logged).toMatchObject({ event: "og_lookup_failed", slug: "vestuario-musical" });
+    expect(logged).toMatchObject({ event: "og_lookup_failed", slug: "demo-collection" });
     error.mockRestore();
+  });
+
+  it("gives no preview tags for a slug that only exists in another tenant", async () => {
+    const h = createHarness();
+    h.raw.sqlite
+      .prepare(
+        `INSERT INTO collections (id, tenant_id, slug, title, description, options_json, deadline, created_at, updated_at)
+         VALUES ('c0000000-0000-4000-8000-0000000000a1', ?, 'only-a', 'Secret title of A', 'Invented.', '[]', '2026-12-31', '2026-11-26T00:00:00.000Z', '2026-11-26T00:00:00.000Z')`,
+      )
+      .run(TENANT_A);
+    const url = new URL("https://demo-b.localhost/r/only-a");
+    const body = await (await servePage(new Request(url), assets, h.b, url, "only-a")).text();
+    expect(body).not.toContain("Secret title of A");
+    expect(body).not.toContain("og:title");
+    h.spy.assertAllScoped(TENANT_B);
   });
 });

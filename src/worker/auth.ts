@@ -3,11 +3,21 @@ import { SESSION_COOKIE, SESSION_TTL_S } from "./constants";
 import { HttpError, clientIp, enforceLimit, json, readJson } from "./http";
 import { base64Url } from "./ids";
 
+/**
+ * Legacy self-host admin auth (one shared password, stateless HMAC cookie). It is NOT tenant-bound, so the composition
+ * root builds it only for single-tenant mode; Cloud admin stays disabled until D1 sessions land.
+ */
+export interface AdminAuthConfig {
+  adminPassword: string;
+  sessionSecret: string;
+  loginLimiter: RateLimit;
+}
+
 export function sessionCookie(value: string, maxAge: number): string {
   return `${SESSION_COOKIE}=${value}; Path=/api/admin; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAge}`;
 }
 
-export async function hasValidSession(request: Request, env: Env): Promise<boolean> {
+export async function hasValidSession(request: Request, auth: AdminAuthConfig): Promise<boolean> {
   const cookie = request.headers.get("cookie") ?? "";
   const token = cookie
     .split(";")
@@ -18,7 +28,7 @@ export async function hasValidSession(request: Request, env: Env): Promise<boole
   const [expRaw, signature] = token.split(".");
   const exp = Number(expRaw);
   if (!Number.isInteger(exp) || exp < Math.floor(Date.now() / 1000) || !signature) return false;
-  const expected = await hmac(env.SESSION_SECRET, `adm:${exp}`);
+  const expected = await hmac(auth.sessionSecret, `adm:${exp}`);
   return secretsMatch(signature, expected);
 }
 
@@ -48,17 +58,17 @@ export async function hmac(secret: string, data: string): Promise<string> {
   return base64Url(new Uint8Array(signature));
 }
 
-export async function login(request: Request, env: Env): Promise<Response> {
-  await enforceLimit(env.LOGIN_LIMITER, `login:${clientIp(request)}`);
+export async function login(request: Request, auth: AdminAuthConfig): Promise<Response> {
+  await enforceLimit(auth.loginLimiter, `login:${clientIp(request)}`);
   const body = await readJson(request);
   const password = typeof body.password === "string" ? body.password : "";
-  const ok = await secretsMatch(password, env.ADMIN_PASSWORD);
+  const ok = await secretsMatch(password, auth.adminPassword);
   if (!ok) {
     console.log(JSON.stringify({ message: "admin login failed" }));
     throw new HttpError(401, "invalid_password", "Contraseña incorrecta.");
   }
   const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_S;
-  const token = `${exp}.${await hmac(env.SESSION_SECRET, `adm:${exp}`)}`;
+  const token = `${exp}.${await hmac(auth.sessionSecret, `adm:${exp}`)}`;
   return json({ ok: true } satisfies OkResponse, 200, { "Set-Cookie": sessionCookie(token, SESSION_TTL_S) });
 }
 

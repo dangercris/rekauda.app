@@ -25,13 +25,17 @@
     "run_worker_first": ["/api/*", "/r/*"]
   },
 
+  // This branch runs the multi-tenant code as a single-tenant instance: one tenant is created on first use and every host maps to it.
+  // The schema lives in migrations-cloud/ (a fresh install; existing instances upgrade through export/import, not in place).
+  "vars": { "TENANCY": "single" },
+
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "rekauda",
       // Printed by `wrangler d1 create rekauda`.
       "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
+      "migrations_dir": "migrations-cloud"
     }
   ],
 

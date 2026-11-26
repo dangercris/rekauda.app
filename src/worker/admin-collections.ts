@@ -7,6 +7,8 @@ import type {
 } from "../shared/api";
 import { DEFAULT_MAX_PER_PAYMENT, DEFAULT_TONE, MAX_COLLECTION_JSON_BYTES } from "./constants";
 import { parseNotes, parseOptions } from "./collections";
+import type { RequestContext } from "./context";
+import type { TenantDb } from "./data/tenant-db";
 import { coverUrl } from "./covers";
 import { HttpError, json, readJson } from "./http";
 import type { CollectionRow } from "./rows";
@@ -16,7 +18,7 @@ function emptyStats(): AdminCollectionStats {
   return { payments: 0, students: 0, enRevision: 0, recibido: 0, observado: 0, pagado: 0, paidCents: 0, expectedCents: 0 };
 }
 
-export function adminCollectionView(row: CollectionRow, stats: AdminCollectionStats): AdminCollection {
+export function adminCollectionView(row: CollectionRow, stats: AdminCollectionStats, r2Prefix: string): AdminCollection {
   return {
     id: row.id,
     slug: row.slug,
@@ -31,7 +33,7 @@ export function adminCollectionView(row: CollectionRow, stats: AdminCollectionSt
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     tone: row.tone,
-    coverUrl: coverUrl(row.cover_key),
+    coverUrl: coverUrl(row.cover_key, r2Prefix),
     deunaLink: row.deuna_link,
     deunaLinkExpires: row.deuna_link_expires,
     stats,
@@ -39,22 +41,22 @@ export function adminCollectionView(row: CollectionRow, stats: AdminCollectionSt
 }
 
 /** Per-collection stats, optionally for a single collection. Void payments are excluded everywhere. */
-async function loadStats(env: Env, collectionId: string | null): Promise<Map<string, AdminCollectionStats>> {
-  const filter = collectionId ? "AND p.collection_id = ?" : "";
-  const bindings = collectionId ? [collectionId] : [];
-  const { results: paymentStats } = await env.DB.prepare(
-    `SELECT p.collection_id, p.status, count(*) AS n, sum(p.amount_cents) AS amount, sum(p.expected_cents) AS expected
-       FROM payments p WHERE p.status != 'anulado' ${filter} GROUP BY p.collection_id, p.status`,
-  )
-    .bind(...bindings)
-    .all<{ collection_id: string; status: PaymentStatus; n: number; amount: number; expected: number }>();
-  const { results: studentStats } = await env.DB.prepare(
-    `SELECT p.collection_id, p.status, count(*) AS n
-       FROM students s JOIN payments p ON p.id = s.payment_id
-      WHERE p.status != 'anulado' ${filter} GROUP BY p.collection_id, p.status`,
-  )
-    .bind(...bindings)
-    .all<{ collection_id: string; status: PaymentStatus; n: number }>();
+async function loadStats(db: TenantDb, collectionId: string | null): Promise<Map<string, AdminCollectionStats>> {
+  // Two fixed statements: ?2 is the collection id when filtering. A NULL filter would not be a plain tenant predicate.
+  const paymentSql = `SELECT p.collection_id, p.status, count(*) AS n, sum(p.amount_cents) AS amount, sum(p.expected_cents) AS expected
+       FROM payments p WHERE p.tenant_id = ?1 AND p.status != 'anulado'`;
+  const studentSql = `SELECT p.collection_id, p.status, count(*) AS n
+       FROM students s JOIN payments p ON p.id = s.payment_id AND p.tenant_id = ?1
+      WHERE s.tenant_id = ?1 AND p.status != 'anulado'`;
+  const group = "GROUP BY p.collection_id, p.status";
+  const { results: paymentStats } = await (collectionId
+    ? db.prepare(`${paymentSql} AND p.collection_id = ?2 ${group}`).bind(collectionId)
+    : db.prepare(`${paymentSql} ${group}`).bind()
+  ).all<{ collection_id: string; status: PaymentStatus; n: number; amount: number; expected: number }>();
+  const { results: studentStats } = await (collectionId
+    ? db.prepare(`${studentSql} AND p.collection_id = ?2 ${group}`).bind(collectionId)
+    : db.prepare(`${studentSql} ${group}`).bind()
+  ).all<{ collection_id: string; status: PaymentStatus; n: number }>();
 
   const stats = new Map<string, AdminCollectionStats>();
   const statsOf = (id: string) => {
@@ -79,35 +81,39 @@ async function loadStats(env: Env, collectionId: string | null): Promise<Map<str
   return stats;
 }
 
-export async function getAdminCollection(env: Env, id: string): Promise<AdminCollection> {
-  const row = await env.DB.prepare("SELECT * FROM collections WHERE id = ?").bind(id).first<CollectionRow>();
+export async function getAdminCollection({ db, tenant }: RequestContext, id: string): Promise<AdminCollection> {
+  const row = await db.prepare("SELECT * FROM collections WHERE tenant_id = ?1 AND id = ?2").bind(id).first<CollectionRow>();
   if (!row) throw new HttpError(404, "collection_not_found", "No encontramos esta recaudación.");
-  const stats = await loadStats(env, id);
-  return adminCollectionView(row, stats.get(id) ?? emptyStats());
+  const stats = await loadStats(db, id);
+  return adminCollectionView(row, stats.get(id) ?? emptyStats(), tenant.r2Prefix);
 }
 
-export async function mutationResponse(env: Env, id: string, status = 200): Promise<Response> {
-  return json({ ok: true, collection: await getAdminCollection(env, id) } satisfies AdminCollectionMutationResponse, status);
+export async function mutationResponse(rc: RequestContext, id: string, status = 200): Promise<Response> {
+  return json({ ok: true, collection: await getAdminCollection(rc, id) } satisfies AdminCollectionMutationResponse, status);
 }
 
-export async function adminListCollections(env: Env): Promise<Response> {
-  const { results: rows } = await env.DB.prepare("SELECT * FROM collections ORDER BY created_at DESC").all<CollectionRow>();
-  const stats = await loadStats(env, null);
-  return json({ collections: rows.map((row) => adminCollectionView(row, stats.get(row.id) ?? emptyStats())) } satisfies AdminCollectionsResponse);
+export async function adminListCollections({ db, tenant }: RequestContext): Promise<Response> {
+  const { results: rows } = await db.prepare("SELECT * FROM collections WHERE tenant_id = ?1 ORDER BY created_at DESC").bind().all<CollectionRow>();
+  const stats = await loadStats(db, null);
+  return json({
+    collections: rows.map((row) => adminCollectionView(row, stats.get(row.id) ?? emptyStats(), tenant.r2Prefix)),
+  } satisfies AdminCollectionsResponse);
 }
 
 function slugTaken(): HttpError {
   return new HttpError(409, "slug_taken", "Ya existe una recaudación con ese enlace. Elige otro.");
 }
 
-async function assertSlugFree(env: Env, slug: string, exceptId: string | null): Promise<void> {
-  const taken = await env.DB.prepare("SELECT 1 FROM collections WHERE slug = ? AND id != ?")
+async function assertSlugFree(db: TenantDb, slug: string, exceptId: string | null): Promise<void> {
+  const taken = await db
+    .prepare("SELECT 1 FROM collections WHERE tenant_id = ?1 AND slug = ?2 AND id != ?3")
     .bind(slug, exceptId ?? "")
     .first();
   if (taken) throw slugTaken();
 }
 
-export async function createCollection(request: Request, env: Env): Promise<Response> {
+export async function createCollection(request: Request, rc: RequestContext): Promise<Response> {
+  const { db } = rc;
   const body = await readJson(request, MAX_COLLECTION_JSON_BYTES);
   const parsed = parseCollectionFields(body, true);
   const fields: CollectionFields = {
@@ -124,15 +130,16 @@ export async function createCollection(request: Request, env: Env): Promise<Resp
     deunaLink: parsed.deunaLink ?? null,
     deunaLinkExpires: parsed.deunaLink ? (parsed.deunaLinkExpires ?? null) : null,
   };
-  await assertSlugFree(env, fields.slug, null);
+  await assertSlugFree(db, fields.slug, null);
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   try {
-    await env.DB.prepare(
-      `INSERT INTO collections (id, slug, title, eyebrow, description, notes_json, options_json, deadline, status, max_per_payment, tone, deuna_link, deuna_link_expires, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
+    await db
+      .prepare(
+        `INSERT INTO collections (tenant_id, id, slug, title, eyebrow, description, notes_json, options_json, deadline, status, max_per_payment, tone, deuna_link, deuna_link_expires, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)`,
+      )
       .bind(
         id,
         fields.slug,
@@ -157,21 +164,24 @@ export async function createCollection(request: Request, env: Env): Promise<Resp
   }
 
   console.log(JSON.stringify({ message: "collection created", id, slug: fields.slug }));
-  return mutationResponse(env, id, 201);
+  return mutationResponse(rc, id, 201);
 }
 
-export async function updateCollection(request: Request, env: Env, id: string): Promise<Response> {
+export async function updateCollection(request: Request, rc: RequestContext, id: string): Promise<Response> {
+  const { db } = rc;
   const body = await readJson(request, MAX_COLLECTION_JSON_BYTES);
-  const existing = await env.DB.prepare("SELECT * FROM collections WHERE id = ?").bind(id).first<CollectionRow>();
+  const existing = await db.prepare("SELECT * FROM collections WHERE tenant_id = ?1 AND id = ?2").bind(id).first<CollectionRow>();
   if (!existing) throw new HttpError(404, "collection_not_found", "No encontramos esta recaudación.");
 
   const changes = parseCollectionFields(body, false);
-  if (changes.slug !== undefined) await assertSlugFree(env, changes.slug, id);
+  if (changes.slug !== undefined) await assertSlugFree(db, changes.slug, id);
 
   if (changes.options) {
-    const { results } = await env.DB.prepare(
-      `SELECT DISTINCT s.option_key FROM students s JOIN payments p ON p.id = s.payment_id WHERE p.collection_id = ?`,
-    )
+    const { results } = await db
+      .prepare(
+        `SELECT DISTINCT s.option_key FROM students s JOIN payments p ON p.id = s.payment_id AND p.tenant_id = ?1
+          WHERE s.tenant_id = ?1 AND p.collection_id = ?2`,
+      )
       .bind(id)
       .all<{ option_key: string }>();
     const kept = new Set(changes.options.map((o) => o.key));
@@ -198,10 +208,12 @@ export async function updateCollection(request: Request, env: Env, id: string): 
   };
   const now = new Date().toISOString();
   try {
-    await env.DB.prepare(
-      `UPDATE collections SET slug = ?, title = ?, eyebrow = ?, description = ?, notes_json = ?, options_json = ?,
-              deadline = ?, status = ?, max_per_payment = ?, tone = ?, deuna_link = ?, deuna_link_expires = ?, updated_at = ? WHERE id = ?`,
-    )
+    await db
+      .prepare(
+        `UPDATE collections SET slug = ?2, title = ?3, eyebrow = ?4, description = ?5, notes_json = ?6, options_json = ?7,
+                deadline = ?8, status = ?9, max_per_payment = ?10, tone = ?11, deuna_link = ?12, deuna_link_expires = ?13, updated_at = ?14
+          WHERE tenant_id = ?1 AND id = ?15`,
+      )
       .bind(
         merged.slug,
         merged.title,
@@ -225,5 +237,5 @@ export async function updateCollection(request: Request, env: Env, id: string): 
   }
 
   console.log(JSON.stringify({ message: "collection updated", id, status: merged.status }));
-  return mutationResponse(env, id);
+  return mutationResponse(rc, id);
 }

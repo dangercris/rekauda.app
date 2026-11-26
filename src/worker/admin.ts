@@ -6,8 +6,9 @@ import type {
 } from "../shared/api";
 import { PAYMENT_STATUSES } from "../shared/api";
 import { adminListCollections, createCollection, mutationResponse, updateCollection } from "./admin-collections";
-import { assertSameOrigin, hasValidSession, isSafeMethod, login, logout } from "./auth";
+import { assertSameOrigin, hasValidSession, isSafeMethod, login, logout, type AdminAuthConfig } from "./auth";
 import { parseOptions } from "./collections";
+import type { RequestContext } from "./context";
 import { removeCover, setCover } from "./covers";
 import { BASE_HEADERS, HttpError, json, readJson } from "./http";
 import { importDeunaEml } from "./import";
@@ -18,8 +19,9 @@ import { cleanText, countBy, normalize } from "./validation";
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const UUID_36 = /^[0-9a-f-]{36}$/;
 
-export async function adminRoute(request: Request, env: Env, url: URL): Promise<Response> {
-  if (!env.ADMIN_PASSWORD || !env.SESSION_SECRET) {
+/** `auth` is null when this deployment has no admin login (Cloud before D1 sessions): every admin route answers 503. */
+export async function adminRoute(request: Request, rc: RequestContext, auth: AdminAuthConfig | null, url: URL): Promise<Response> {
+  if (!auth?.adminPassword || !auth.sessionSecret) {
     throw new HttpError(503, "admin_disabled", "El acceso de administración no está configurado.");
   }
   const { pathname } = url;
@@ -28,71 +30,78 @@ export async function adminRoute(request: Request, env: Env, url: URL): Promise<
   // Every mutation (POST, DELETE...) must come from this origin, before anything else runs.
   if (!isSafeMethod(method)) assertSameOrigin(request, url);
 
-  if (pathname === "/api/admin/login" && method === "POST") return login(request, env);
+  if (pathname === "/api/admin/login" && method === "POST") return login(request, auth);
   if (pathname === "/api/admin/logout" && method === "POST") return logout();
 
-  if (!(await hasValidSession(request, env))) throw new HttpError(401, "unauthorized", "Tu sesión expiró. Ingresa de nuevo.");
+  if (!(await hasValidSession(request, auth))) throw new HttpError(401, "unauthorized", "Tu sesión expiró. Ingresa de nuevo.");
 
   if (pathname === "/api/admin/session" && method === "GET") return json({ ok: true });
-  if (pathname === "/api/admin/payments" && method === "GET") return listPayments(env, url.searchParams.get("collection"));
-  if (pathname === "/api/admin/collections" && method === "GET") return adminListCollections(env);
-  if (pathname === "/api/admin/collections" && method === "POST") return createCollection(request, env);
+  if (pathname === "/api/admin/payments" && method === "GET") return listPayments(rc, url.searchParams.get("collection"));
+  if (pathname === "/api/admin/collections" && method === "GET") return adminListCollections(rc);
+  if (pathname === "/api/admin/collections" && method === "POST") return createCollection(request, rc);
 
   const collectionId = new RegExp(`^/api/admin/collections/(${UUID})$`).exec(pathname)?.[1];
-  if (collectionId && method === "POST") return updateCollection(request, env, collectionId);
+  if (collectionId && method === "POST") return updateCollection(request, rc, collectionId);
 
   const coverId = new RegExp(`^/api/admin/collections/(${UUID})/cover$`).exec(pathname)?.[1];
   if (coverId && method === "POST") {
-    await setCover(request, env, coverId);
-    return mutationResponse(env, coverId);
+    await setCover(request, rc, coverId);
+    return mutationResponse(rc, coverId);
   }
   if (coverId && method === "DELETE") {
-    await removeCover(env, coverId);
-    return mutationResponse(env, coverId);
+    await removeCover(rc, coverId);
+    return mutationResponse(rc, coverId);
   }
 
-  if (pathname === "/api/admin/movements" && method === "GET") return listMovements(env, url.searchParams.get("status"));
-  if (pathname === "/api/admin/movements/import" && method === "POST") return importDeunaEml(request, env);
+  if (pathname === "/api/admin/movements" && method === "GET") return listMovements(rc, url.searchParams.get("status"));
+  if (pathname === "/api/admin/movements/import" && method === "POST") return importDeunaEml(request, rc);
   const movementMatch = new RegExp(`^/api/admin/movements/(${UUID})/(link|unlink|ignore)$`).exec(pathname);
   if (movementMatch && method === "POST") {
     const [, movementId = "", action] = movementMatch;
-    if (action === "link") return manualLink(request, env, movementId);
-    if (action === "unlink") return unlinkMovement(env, movementId);
-    return ignoreMovement(env, movementId);
+    if (action === "link") return manualLink(request, rc, movementId);
+    if (action === "unlink") return unlinkMovement(rc, movementId);
+    return ignoreMovement(rc, movementId);
   }
 
   const receiptId = new RegExp(`^/api/admin/receipts/(${UUID})$`).exec(pathname)?.[1];
-  if (receiptId && method === "GET") return receipt(env, receiptId);
+  if (receiptId && method === "GET") return receipt(rc, receiptId);
 
   const statusId = new RegExp(`^/api/admin/payments/(${UUID})/status$`).exec(pathname)?.[1];
-  if (statusId && method === "POST") return updateStatus(request, env, statusId);
+  if (statusId && method === "POST") return updateStatus(request, rc, statusId);
 
   throw new HttpError(404, "not_found", "Ruta no encontrada.");
 }
 
-async function listPayments(env: Env, collectionFilter: string | null): Promise<Response> {
+async function listPayments({ db }: RequestContext, collectionFilter: string | null): Promise<Response> {
   if (collectionFilter !== null && !UUID_36.test(collectionFilter)) {
     throw new HttpError(400, "invalid_collection", "Recaudación no válida.");
   }
 
-  const { results: collections } = await env.DB.prepare("SELECT id, options_json FROM collections").all<Pick<CollectionRow, "id" | "options_json">>();
+  const { results: collections } = await db
+    .prepare("SELECT id, options_json FROM collections WHERE tenant_id = ?1")
+    .bind()
+    .all<Pick<CollectionRow, "id" | "options_json">>();
   const labelsByCollection = new Map(collections.map((c) => [c.id, new Map(parseOptions(c.options_json).map((o) => [o.key, o.label]))]));
 
   const paymentsQuery = collectionFilter
-    ? env.DB.prepare("SELECT * FROM payments WHERE collection_id = ? ORDER BY created_at DESC").bind(collectionFilter)
-    : env.DB.prepare("SELECT * FROM payments ORDER BY created_at DESC");
+    ? db.prepare("SELECT * FROM payments WHERE tenant_id = ?1 AND collection_id = ?2 ORDER BY created_at DESC").bind(collectionFilter)
+    : db.prepare("SELECT * FROM payments WHERE tenant_id = ?1 ORDER BY created_at DESC").bind();
   const studentsQuery = collectionFilter
-    ? env.DB.prepare(
-        `SELECT s.payment_id, s.given_names, s.surnames, s.option_key FROM students s JOIN payments p ON p.id = s.payment_id
-          WHERE p.collection_id = ? ORDER BY s.id`,
-      ).bind(collectionFilter)
-    : env.DB.prepare("SELECT payment_id, given_names, surnames, option_key FROM students ORDER BY id");
+    ? db
+        .prepare(
+          `SELECT s.payment_id, s.given_names, s.surnames, s.option_key FROM students s JOIN payments p ON p.id = s.payment_id AND p.tenant_id = ?1
+            WHERE s.tenant_id = ?1 AND p.collection_id = ?2 ORDER BY s.id`,
+        )
+        .bind(collectionFilter)
+    : db.prepare("SELECT payment_id, given_names, surnames, option_key FROM students WHERE tenant_id = ?1 ORDER BY id").bind();
 
   const movementsQuery = collectionFilter
-    ? env.DB.prepare(
-        "SELECT m.* FROM bank_movements m JOIN payments p ON p.id = m.payment_id WHERE p.collection_id = ?",
-      ).bind(collectionFilter)
-    : env.DB.prepare("SELECT * FROM bank_movements WHERE payment_id IS NOT NULL");
+    ? db
+        .prepare(
+          "SELECT m.* FROM bank_movements m JOIN payments p ON p.id = m.payment_id AND p.tenant_id = ?1 WHERE m.tenant_id = ?1 AND p.collection_id = ?2",
+        )
+        .bind(collectionFilter)
+    : db.prepare("SELECT * FROM bank_movements WHERE tenant_id = ?1 AND payment_id IS NOT NULL").bind();
 
   const [{ results: payments }, { results: students }, { results: movements }] = await Promise.all([
     paymentsQuery.all<PaymentRow>(),
@@ -150,12 +159,13 @@ async function listPayments(env: Env, collectionFilter: string | null): Promise<
   } satisfies AdminPaymentsResponse);
 }
 
-async function receipt(env: Env, id: string): Promise<Response> {
-  const row = await env.DB.prepare("SELECT code, receipt_key, receipt_type FROM payments WHERE id = ?")
+async function receipt({ db, storage }: RequestContext, id: string): Promise<Response> {
+  const row = await db
+    .prepare("SELECT code, receipt_key, receipt_type FROM payments WHERE tenant_id = ?1 AND id = ?2")
     .bind(id)
     .first<Pick<PaymentRow, "code" | "receipt_key" | "receipt_type">>();
   if (!row) throw new HttpError(404, "not_found", "Comprobante no encontrado.");
-  const object = await env.RECEIPTS.get(row.receipt_key);
+  const object = await storage.get(row.receipt_key);
   if (!object) throw new HttpError(404, "not_found", "El archivo del comprobante no está disponible.");
 
   const ext = row.receipt_key.split(".").pop() ?? "bin";
@@ -175,7 +185,7 @@ async function receipt(env: Env, id: string): Promise<Response> {
   return new Response(object.body, { headers });
 }
 
-async function updateStatus(request: Request, env: Env, id: string): Promise<Response> {
+async function updateStatus(request: Request, { db }: RequestContext, id: string): Promise<Response> {
   const body = await readJson(request);
   const status = PAYMENT_STATUSES.find((s) => s === body.status);
   if (!status) throw new HttpError(400, "invalid_status", "Estado no válido.");
@@ -185,17 +195,18 @@ async function updateStatus(request: Request, env: Env, id: string): Promise<Res
   }
 
   const now = new Date().toISOString();
-  const result = await env.DB.prepare(
-    `UPDATE payments
-        SET status = ?,
-            review_note = CASE WHEN ? != '' THEN ? ELSE review_note END,
-            reviewed_by = 'admin',
-            reviewed_at = ?,
-            paid_at = CASE WHEN ? = 'pagado' THEN ? ELSE NULL END,
-            updated_at = ?
-      WHERE id = ?`,
-  )
-    .bind(status, note, note, now, status, now, now, id)
+  const result = await db
+    .prepare(
+      `UPDATE payments
+          SET status = ?2,
+              review_note = CASE WHEN ?3 != '' THEN ?3 ELSE review_note END,
+              reviewed_by = 'admin',
+              reviewed_at = ?4,
+              paid_at = CASE WHEN ?2 = 'pagado' THEN ?4 ELSE NULL END,
+              updated_at = ?4
+        WHERE tenant_id = ?1 AND id = ?5`,
+    )
+    .bind(status, note, now, id)
     .run();
   if (!result.meta.changes) throw new HttpError(404, "not_found", "Registro no encontrado.");
 

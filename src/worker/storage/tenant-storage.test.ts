@@ -101,3 +101,37 @@ describe("empty prefix (legacy tenants)", () => {
     expect(() => new TenantStorage(asR2(new FakeBucket()), { id: TENANT_A, r2Prefix: "t/", source: "self_host" })).toThrow(TenantStorageViolation);
   });
 });
+
+describe("TenantStorage keyFor, list and multi-delete", () => {
+  it("keyFor returns the full key for a relative key and refuses anything else", () => {
+    const storage = new TenantStorage(asR2(new FakeBucket()), cloud(TENANT_A));
+    expect(storage.keyFor(coverKey("c1", "0123456789abcdef", "png"))).toBe(`t/${TENANT_A}/covers/c1/0123456789abcdef.png`);
+    expect(() => storage.keyFor("../x")).toThrow(TenantStorageViolation);
+    expect(() => storage.keyFor(`t/${TENANT_B}/receipts/x.png`)).toThrow(TenantStorageViolation);
+  });
+
+  it("lists only keys under the tenant prefix, returned as full keys", async () => {
+    const bucket = new FakeBucket();
+    const a = new TenantStorage(asR2(bucket), cloud(TENANT_A));
+    const b = new TenantStorage(asR2(bucket), cloud(TENANT_B));
+    await a.put(ogKey("curso", "v1"), "1");
+    await a.put(ogKey("curso", "v2"), "2");
+    await b.put(ogKey("curso", "v9"), "9");
+    expect((await a.list("og/curso/")).sort()).toEqual([`t/${TENANT_A}/og/curso/v1.jpg`, `t/${TENANT_A}/og/curso/v2.jpg`]);
+    expect(bucket.lists).toEqual([`t/${TENANT_A}/og/curso/`]);
+    await expect(a.list("../")).rejects.toThrow(TenantStorageViolation);
+    await expect(a.list(`t/${TENANT_B}/og/`)).rejects.toThrow(TenantStorageViolation);
+    expect(bucket.lists).toHaveLength(1);
+  });
+
+  it("deletes several own keys at once and refuses the whole call when one is foreign", async () => {
+    const bucket = new FakeBucket();
+    const a = new TenantStorage(asR2(bucket), cloud(TENANT_A));
+    const k1 = await a.put(ogKey("curso", "v1"), "1");
+    const k2 = await a.put(ogKey("curso", "v2"), "2");
+    await expect(a.delete([k1, `t/${TENANT_B}/og/curso/v9.jpg`])).rejects.toThrow(TenantStorageViolation);
+    expect(bucket.objects.size).toBe(2);
+    await a.delete([k1, k2]);
+    expect(bucket.objects.size).toBe(0);
+  });
+});

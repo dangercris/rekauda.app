@@ -1,9 +1,13 @@
 import { CustomFont, cache, render } from "@cf-wasm/og/workerd";
 import geistBold from "./fonts/Geist-Bold.ttf";
 import geistMedium from "./fonts/Geist-Medium.ttf";
+import type { RequestContext } from "./context";
+import type { BaseEnv } from "./env";
 import { BASE_HEADERS, fail } from "./http";
 import { buildOgCard, OG_HEIGHT, OG_WIDTH, ogVersion, rgba, type OgCard } from "./og-card";
 import { isPublicRow, type CollectionRow } from "./rows";
+import { ogKey } from "./storage/keys";
+import type { TenantStorage } from "./storage/tenant-storage";
 
 /**
  * GET /api/og/<slug>.jpg: the link-preview image (WhatsApp, Telegram, Facebook...) drawn from the collection itself:
@@ -157,11 +161,11 @@ export function cardTree(card: OgCard, coverDataUrl: string | null): VNode {
   );
 }
 
-async function coverDataUrl(env: Env, key: string | null): Promise<string | null> {
+async function coverDataUrl(storage: TenantStorage, key: string | null): Promise<string | null> {
   const ext = key?.split(".").pop() ?? "";
   const type = COVER_TYPES[ext];
   if (!key || !type) return null;
-  const object = await env.RECEIPTS.get(key);
+  const object = await storage.get(key);
   if (!object) return null;
   const bytes = new Uint8Array(await object.arrayBuffer());
   let binary = "";
@@ -172,7 +176,7 @@ async function coverDataUrl(env: Env, key: string | null): Promise<string | null
 const JPEG_QUALITY = 85;
 
 /** PNG -> JPEG through the Images binding. The PNG is served as is if the binding is unavailable or fails. */
-async function encode(env: Env, png: Uint8Array): Promise<{ body: ArrayBuffer | Uint8Array; type: string }> {
+async function encode(env: Pick<BaseEnv, "IMAGES">, png: Uint8Array): Promise<{ body: ArrayBuffer | Uint8Array; type: string }> {
   try {
     const result = await env.IMAGES.input(new Blob([png]).stream()).output({ format: "image/jpeg", quality: JPEG_QUALITY });
     return { body: await new Response(result.image()).arrayBuffer(), type: result.contentType() };
@@ -182,18 +186,10 @@ async function encode(env: Env, png: Uint8Array): Promise<{ body: ArrayBuffer | 
   }
 }
 
-/** Rendered cards are stored once per collection version (the Cache API is a no-op on workers.dev). */
-export const OG_PREFIX = "og/";
-
-export function ogKey(slug: string, version: string): string {
-  return `${OG_PREFIX}${slug}/${version}.jpg`;
-}
-
-/** Deletes the stored cards of older versions of this collection. */
-async function pruneOldCards(env: Env, slug: string, keep: string): Promise<void> {
-  const { objects } = await env.RECEIPTS.list({ prefix: `${OG_PREFIX}${slug}/` });
-  const stale = objects.map((o) => o.key).filter((key) => key !== keep);
-  if (stale.length) await env.RECEIPTS.delete(stale);
+/** Deletes the stored cards of older versions of this collection (rendered cards are stored once per collection version). */
+async function pruneOldCards(storage: TenantStorage, slug: string, keep: string): Promise<void> {
+  const stale = (await storage.list(`og/${slug}/`)).filter((key) => key !== keep);
+  if (stale.length) await storage.delete(stale);
 }
 
 /**
@@ -201,13 +197,20 @@ async function pruneOldCards(env: Env, slug: string, keep: string): Promise<void
  * Always answers with the card for the collection as it is now. The URL version only decides caching:
  * the current `v` is immutable, anything else (old link, no `v`) is cached briefly.
  */
-export async function serveOgImage(request: Request, env: Env, ctx: ExecutionContext, url: URL, slug: string): Promise<Response> {
+export async function serveOgImage(
+  request: Request,
+  { db, storage }: RequestContext,
+  env: Pick<BaseEnv, "IMAGES">,
+  ctx: ExecutionContext,
+  url: URL,
+  slug: string,
+): Promise<Response> {
   cache.setExecutionContext(ctx);
-  const row = await env.DB.prepare("SELECT * FROM collections WHERE slug = ?").bind(slug).first<CollectionRow>();
+  const row = await db.prepare("SELECT * FROM collections WHERE tenant_id = ?1 AND slug = ?2").bind(slug).first<CollectionRow>();
   if (!row || !isPublicRow(row)) return fail(404, "not_found", "Imagen no encontrada.");
 
   const version = ogVersion(row);
-  const key = ogKey(slug, version);
+  const key = storage.keyFor(ogKey(slug, version));
   const headers = (type: string): Record<string, string> => ({
     ...BASE_HEADERS,
     "Content-Type": type,
@@ -217,12 +220,12 @@ export async function serveOgImage(request: Request, env: Env, ctx: ExecutionCon
   });
   const respond = (body: BodyInit, type: string): Response => new Response(request.method === "HEAD" ? null : body, { headers: headers(type) });
 
-  const stored = await env.RECEIPTS.get(key);
+  const stored = await storage.get(key);
   if (stored) return respond(stored.body, "image/jpeg");
 
   let cover: string | null = null;
   try {
-    cover = await coverDataUrl(env, row.cover_key);
+    cover = await coverDataUrl(storage, row.cover_key);
   } catch (err) {
     console.error(JSON.stringify({ level: "error", event: "og_cover_failed", slug, message: err instanceof Error ? err.message : String(err) }));
   }
@@ -232,8 +235,9 @@ export async function serveOgImage(request: Request, env: Env, ctx: ExecutionCon
   // Only JPEGs are stored: a PNG fallback means the Images binding failed, so the next request tries again.
   if (encoded.type === "image/jpeg") {
     ctx.waitUntil(
-      env.RECEIPTS.put(key, encoded.body, { httpMetadata: { contentType: "image/jpeg" }, customMetadata: { slug, version } })
-        .then(() => pruneOldCards(env, slug, key))
+      storage
+        .put(ogKey(slug, version), encoded.body, { httpMetadata: { contentType: "image/jpeg" }, customMetadata: { slug, version } })
+        .then(() => pruneOldCards(storage, slug, key))
         .catch((err: unknown) => console.error(JSON.stringify({ level: "error", event: "og_store_failed", slug, message: err instanceof Error ? err.message : String(err) }))),
     );
   }
