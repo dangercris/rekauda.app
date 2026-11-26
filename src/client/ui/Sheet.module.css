@@ -1,0 +1,150 @@
+.sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 10px 20px calc(24px + var(--safe-bottom));
+  border-radius: var(--r-hero) var(--r-hero) 0 0;
+  border-bottom-width: 0;
+  min-height: 100%;
+}
+
+.grabber {
+  align-self: center;
+  width: 40px;
+  height: 5px;
+  border-radius: var(--r-pill);
+  background: var(--line-strong);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.heading {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--fs-sheet);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+
+.footer {
+  position: sticky;
+  bottom: calc(12px + var(--safe-bottom));
+  margin-top: auto;
+  padding-top: 4px;
+  z-index: 2;
+}
+
+/* Layout over the cover */
+.layout {
+  position: relative;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 420px;
+  overflow: hidden;
+}
+
+.cover,
+.toneCover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(1.2);
+}
+
+.toneCover {
+  background:
+    radial-gradient(120% 90% at 10% 0%, var(--ev2) 0%, transparent 55%),
+    radial-gradient(90% 80% at 100% 30%, var(--ev3) 0%, transparent 60%),
+    var(--ev);
+}
+
+.dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 8, 12, 0.55);
+}
+
+.context {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  top: calc(30px + var(--safe-top));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #ffffff;
+  opacity: 0.9;
+}
+
+.eyebrow {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+}
+
+.contextTitle {
+  font-size: 1.625rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-title);
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slot {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin-top: calc(104px + var(--safe-top));
+}
+
+.slot > * {
+  flex: 1;
+}
+
+@media (min-width: 960px) {
+  .layout {
+    align-items: center;
+  }
+  .slot {
+    width: min(100%, 36rem);
+  }
+  .sheet {
+    border-radius: var(--r-hero);
+    border-bottom-width: 1px;
+    min-height: auto;
+    margin-bottom: 32px;
+  }
+}

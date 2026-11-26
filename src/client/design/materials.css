@@ -1,0 +1,111 @@
+/*
+  Materials · global classes shared by components (prefixed m-).
+  Recipe from the design canvas: blur 28px saturate 190%, white 56% / dark 50% fill,
+  1px edge, 1px top highlight, sheen at 155deg. Under the glass there is always ambient event light.
+*/
+
+.m-glass {
+  background-color: var(--glass);
+  background-image: var(--sheen);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--hi), var(--shadow);
+}
+
+/* Denser glass for inner groups and fields placed on glass */
+.m-glass-strong {
+  background-color: var(--glass-strong);
+  border: 1px solid var(--line);
+}
+
+/* Glass on top of photos (hero chips, cover buttons). Always light text. */
+.m-glass-dark {
+  /* Canvas uses .32; .36 plus the hero scrim keeps white text >= 4.5:1 even over a white cover. */
+  background-color: rgba(18, 18, 24, 0.36);
+  background-image: linear-gradient(155deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 45%);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32);
+  color: #ffffff;
+}
+
+/* Bottom sheets: stronger blur and fill, shadow cast upward */
+.m-sheet {
+  background-color: var(--sheet);
+  background-image: var(--sheen);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--hi), 0 -20px 60px -20px rgba(0, 0, 0, 0.45);
+}
+
+/* Event button: tone fill, inner light, tone-colored glow */
+.m-ev {
+  background-color: var(--ev);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 55%);
+  color: var(--ev-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), inset 0 -1px 0 rgba(0, 0, 0, 0.14), 0 14px 28px -12px var(--ev);
+}
+
+/* Neutral "tinta" button */
+.m-ink {
+  background-color: var(--ink);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 55%);
+  color: var(--ink-fg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 10px 22px -12px rgba(0, 0, 0, 0.5);
+}
+
+.m-ok {
+  background-color: var(--ok-solid);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 55%);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -1px 0 rgba(0, 0, 0, 0.14), 0 14px 26px -12px var(--ok-solid);
+}
+
+.m-bad {
+  background-color: var(--bad-solid);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 55%);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 14px 26px -12px var(--bad-solid);
+}
+
+/* No backdrop-filter support: denser fills so text keeps its contrast */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .m-glass {
+    background-color: var(--glass-strong);
+  }
+  .m-glass-dark {
+    background-color: rgba(18, 18, 24, 0.62);
+  }
+  .m-sheet {
+    background-color: var(--sheet-solid);
+  }
+}
+
+/* Reduced transparency: solid surfaces, no blur, no sheen */
+@media (prefers-reduced-transparency: reduce) {
+  .m-glass,
+  .m-sheet {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background-image: none;
+  }
+  .m-glass {
+    background-color: var(--glass-solid);
+    border-color: var(--line);
+  }
+  .m-sheet {
+    background-color: var(--sheet-solid);
+  }
+  .m-glass-strong {
+    background-color: var(--surface-solid);
+  }
+  .m-glass-dark {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background-image: none;
+    background-color: rgba(10, 10, 14, 0.72);
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+.wrangler/
+.dev.vars*
+.env*
+receipts-inbox/
+dist/
+
+# Per-instance files: created from the committed *.example.* files by scripts/ensure-config.mjs
+rekauda.config.ts
+wrangler.jsonc
+redirect/wrangler.jsonc
+public/deuna-qr.png

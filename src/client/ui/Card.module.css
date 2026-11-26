@@ -1,0 +1,29 @@
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: inherit;
+}
+
+.dashed {
+  border: 1px dashed var(--line-strong);
+}
+
+.r_md { border-radius: var(--r-md); }
+.r_lg { border-radius: 20px; }
+.r_xl { border-radius: var(--r-xl); }
+.r_2xl { border-radius: var(--r-2xl); }
+.r_3xl { border-radius: var(--r-3xl); }
+
+.p_none { padding: 0; }
+.p_sm { padding: 12px; }
+.p_md { padding: 16px 18px; }
+.p_lg { padding: 20px; }
+
+.g_6 { gap: 6px; }
+.g_8 { gap: 8px; }
+.g_10 { gap: 10px; }
+.g_12 { gap: 12px; }
+.g_14 { gap: 14px; }
+.g_16 { gap: 16px; }

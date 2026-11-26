@@ -1,0 +1,35 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+  border-radius: var(--r-pill);
+  font-weight: var(--fw-strong);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.sm {
+  height: 22px;
+  padding: 0 8px;
+  gap: 4px;
+  font-size: 0.71875rem;
+}
+
+.md {
+  height: 28px;
+  padding: 0 11px;
+  font-size: var(--fs-meta);
+}
+
+.lg {
+  height: 30px;
+  padding: 0 12px;
+  font-size: var(--fs-meta);
+}
+
+.warn { background: var(--warn-bg); color: var(--warn); }
+.info { background: var(--info-bg); color: var(--info); }
+.bad { background: var(--bad-bg); color: var(--bad); }
+.ok { background: var(--ok-bg); color: var(--ok); }
+.void { background: var(--void-bg); color: var(--void); }

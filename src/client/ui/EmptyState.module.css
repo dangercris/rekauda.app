@@ -1,0 +1,39 @@
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 28px 20px;
+  text-align: center;
+}
+
+.card {
+  border-radius: 24px;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 6px;
+  border-radius: 15px;
+  background: var(--ev-soft);
+  color: var(--ev-text);
+}
+
+.title {
+  font-weight: var(--fw-semibold);
+  text-wrap: balance;
+}
+
+.description {
+  max-width: 28rem;
+  font-size: var(--fs-small);
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+.action {
+  margin-top: 10px;
+}

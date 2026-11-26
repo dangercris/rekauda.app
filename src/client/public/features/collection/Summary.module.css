@@ -1,0 +1,181 @@
+.priceRow {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.caption {
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+}
+
+.deadline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: none;
+  text-align: right;
+}
+
+.deadlineValue {
+  font-size: var(--fs-value);
+  font-weight: var(--fw-strong);
+  letter-spacing: var(--tracking-section);
+  line-height: 1.15;
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--touch);
+  margin: -4px 0 -6px;
+  padding: 4px 0 6px;
+  text-align: left;
+  border-radius: var(--r-sm);
+}
+
+.progressMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.progressMeta strong {
+  color: var(--fg);
+  font-weight: var(--fw-semibold);
+}
+
+.progressLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: var(--fw-semibold);
+  color: var(--ev-text);
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.detailsCard {
+  margin: 0;
+}
+
+.deadlineRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.deadlineText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.deadlineDate {
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+}
+
+.deadlineLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.urgent {
+  color: var(--warn);
+  font-weight: var(--fw-semibold);
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: var(--sp-1) 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2-5) 0;
+}
+
+.option + .option {
+  border-top: 1px solid var(--line);
+}
+
+.optionText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.optionLabel {
+  font-weight: var(--fw-semibold);
+}
+
+.optionDetail {
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.optionPrice {
+  flex: none;
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-title-sm);
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2-5);
+  margin: 0;
+  padding: var(--sp-4) 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2-5);
+  font-size: var(--fs-small);
+  color: var(--fg-2);
+}
+
+.note svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--ev-text);
+}
+
+.description {
+  color: var(--fg-2);
+  text-wrap: pretty;
+  white-space: pre-line;
+}

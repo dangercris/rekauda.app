@@ -1,0 +1,65 @@
+.kv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+}
+
+.value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.sm {
+  font-size: var(--fs-ui);
+}
+
+.md {
+  font-size: var(--fs-body);
+}
+
+.lg {
+  font-size: var(--fs-value);
+  letter-spacing: 0.01em;
+}
+
+.accent {
+  color: var(--ev-text);
+}
+
+.hint {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 14px 16px;
+}
+
+.grow {
+  flex: 1;
+}
+
+.button {
+  min-width: 6.5rem;
+}
+
+.copied {
+  color: var(--ok);
+}
+
+.failed {
+  color: var(--bad);
+}

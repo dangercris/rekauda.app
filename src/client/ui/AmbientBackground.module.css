@@ -1,0 +1,96 @@
+.ambient {
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+
+.fixed {
+  position: fixed;
+}
+
+.contained {
+  position: absolute;
+  border-radius: inherit;
+}
+
+.cover {
+  position: absolute;
+  left: -160px;
+  right: -160px;
+  top: -160px;
+  width: calc(100% + 320px);
+  max-width: none;
+  height: min(1000px, 110%);
+  object-fit: cover;
+  filter: blur(90px) saturate(1.7);
+  opacity: var(--amb);
+  transform: translateZ(0);
+  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+}
+
+.glow {
+  position: absolute;
+  left: -30%;
+  right: -30%;
+  top: -260px;
+  height: 760px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--ev), transparent);
+  filter: blur(60px);
+  opacity: calc(var(--amb) * 0.8);
+  transform: translateZ(0);
+}
+
+.blob {
+  position: absolute;
+  width: 480px;
+  height: 480px;
+  border-radius: 50%;
+  filter: blur(120px);
+  transform: translateZ(0);
+}
+
+.blob2 {
+  left: -200px;
+  top: 58%;
+  background: var(--ev2);
+  opacity: 0.2;
+}
+
+.blob3 {
+  right: -220px;
+  top: 84%;
+  background: var(--ev3);
+  opacity: 0.18;
+}
+
+.subtle .cover,
+.subtle .glow {
+  opacity: calc(var(--amb) * 0.6);
+}
+
+.subtle .blob {
+  opacity: 0.12;
+}
+
+.flat {
+  display: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .cover,
+  .glow,
+  .blob {
+    display: none;
+  }
+  .flat {
+    display: block;
+    position: absolute;
+    inset: 0 0 auto;
+    height: 420px;
+    background: linear-gradient(180deg, var(--ev-soft), transparent);
+  }
+}

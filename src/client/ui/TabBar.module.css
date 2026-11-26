@@ -1,0 +1,154 @@
+.bar {
+  z-index: var(--z-bar);
+  padding: 6px;
+  border-radius: 30px;
+}
+
+.list {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cell {
+  min-width: 0;
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 54px;
+  border-radius: 24px;
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-medium);
+  color: var(--fg-2);
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur) var(--ease-out),
+    color var(--dur) var(--ease-out);
+}
+
+.active {
+  background: var(--selected);
+  box-shadow: var(--selected-shadow);
+  color: var(--fg);
+  font-weight: var(--fw-strong);
+}
+
+.iconWrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.badge {
+  position: absolute;
+  top: -6px;
+  left: calc(100% - 6px);
+}
+
+.label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Bottom placement (phones) */
+.bottom,
+.auto {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(14px + var(--safe-bottom));
+  max-width: 30rem;
+  margin: 0 auto;
+}
+
+.spacer {
+  height: calc(96px + var(--safe-bottom));
+}
+
+/* Top placement (desktop) */
+.top {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: var(--r-xl);
+  padding: 5px;
+}
+
+.top .list {
+  grid-auto-columns: auto;
+}
+
+.top .label,
+.auto .label {
+  order: 1;
+}
+
+.top .badge {
+  order: 2;
+}
+
+.top .tab {
+  flex-direction: row;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 17px;
+  font-size: var(--fs-ui);
+}
+
+.top .badge {
+  position: static;
+  margin-left: 2px;
+}
+
+.top .iconWrap {
+  display: contents;
+}
+
+@media (min-width: 960px) {
+  .auto {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    width: fit-content;
+    max-width: 100%;
+    margin: 0;
+    border-radius: var(--r-xl);
+    padding: 5px;
+  }
+  .auto .list {
+    grid-auto-columns: auto;
+  }
+  .auto .tab {
+    flex-direction: row;
+    gap: 8px;
+    height: 44px;
+    padding: 0 16px;
+    border-radius: 17px;
+    font-size: var(--fs-ui);
+  }
+  .auto .iconWrap {
+    display: contents;
+  }
+  .auto .badge {
+    position: static;
+    margin-left: 2px;
+    order: 2;
+  }
+  .spacer_auto {
+    display: none;
+  }
+}

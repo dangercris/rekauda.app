@@ -1,0 +1,135 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-1);
+}
+
+.title {
+  font-size: var(--fs-sheet);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.sub {
+  color: var(--fg-2);
+}
+
+.lookup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--sp-2);
+}
+
+.lookupField input {
+  font-size: 1.125rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lookupButton {
+  min-width: 112px;
+}
+
+.result {
+  scroll-margin: 96px 0;
+}
+
+.resultHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.resultCode {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.caption {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+}
+
+.code {
+  font-size: var(--fs-value);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  color: var(--ev-text);
+}
+
+.collection {
+  margin-top: -6px;
+  font-weight: var(--fw-semibold);
+  color: var(--fg-2);
+}
+
+.rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+  padding: var(--sp-3) 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.row dt {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+}
+
+.row dd {
+  margin: 0;
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.students {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+}
+
+.option {
+  display: block;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-regular);
+  color: var(--muted);
+}
+
+.saved {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2-5);
+  margin-top: var(--sp-2);
+}
+
+.savedTitle {
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}

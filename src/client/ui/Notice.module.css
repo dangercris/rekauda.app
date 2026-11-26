@@ -1,0 +1,45 @@
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 12px 14px;
+  border-radius: var(--r-xl);
+}
+
+.solid {
+  gap: 14px;
+  padding: 16px;
+  border-radius: 24px;
+}
+
+.solidIcon {
+  width: 48px;
+  height: 48px;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.title {
+  font-size: var(--fs-ui);
+  font-weight: var(--fw-semibold);
+}
+
+.solid .title {
+  font-size: var(--fs-input);
+  font-weight: var(--fw-strong);
+}
+
+.description {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.action {
+  flex: none;
+}

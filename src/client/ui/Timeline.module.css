@@ -1,0 +1,129 @@
+.timeline {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.marker {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.line {
+  flex: 1;
+  width: 2px;
+  min-height: 18px;
+  background: var(--line-strong);
+}
+
+.done .marker {
+  background: var(--ok-solid);
+  color: #ffffff;
+}
+
+.done .line {
+  background: var(--ok-solid);
+  opacity: 0.5;
+}
+
+.current .marker {
+  background: var(--warn-bg);
+  box-shadow: 0 0 0 4px var(--warn-bg);
+}
+
+.pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--warn-solid);
+}
+
+.tone_info .marker {
+  background: var(--info-bg);
+  box-shadow: 0 0 0 4px var(--info-bg);
+}
+.tone_info .pulse {
+  background: var(--info-solid);
+}
+.tone_event .marker {
+  background: var(--ev-soft);
+  box-shadow: 0 0 0 4px var(--ev-soft);
+}
+.tone_event .pulse {
+  background: var(--ev);
+}
+
+.pending .marker {
+  border: 2px solid var(--line-strong);
+}
+
+.alert .marker {
+  background: var(--bad-bg);
+  color: var(--bad);
+  box-shadow: 0 0 0 4px var(--bad-bg);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  padding: 1px 0 16px;
+  min-width: 0;
+}
+
+.lastBody {
+  padding-bottom: 0;
+}
+
+.title {
+  font-weight: var(--fw-semibold);
+}
+
+.pending .title {
+  color: var(--fg-2);
+}
+
+.description {
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.meta {
+  padding-top: 2px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.current .meta {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  color: var(--warn);
+}
+.tone_info .meta {
+  color: var(--info);
+}
+.tone_event .meta {
+  color: var(--ev-text);
+}
+.alert .meta {
+  color: var(--bad);
+  font-weight: var(--fw-semibold);
+}

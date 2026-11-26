@@ -1,0 +1,140 @@
+.fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-2);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.swatch {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 84px;
+  border-radius: 20px;
+  background-image: linear-gradient(160deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0) 50%);
+  transition: transform var(--dur) var(--ease-out);
+}
+
+.option:active .swatch {
+  transform: scale(0.97);
+}
+
+.checked .swatch {
+  outline: 3px solid var(--fg);
+  outline-offset: 3px;
+}
+
+.option:has(input:focus-visible) .swatch {
+  outline: 3px solid var(--ev-text);
+  outline-offset: 3px;
+}
+
+.check {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: #0e1117;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+}
+
+.caption {
+  display: flex;
+  flex-direction: column;
+  padding: 0 2px;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.name {
+  font-size: 0.84375rem;
+  font-weight: var(--fw-semibold);
+}
+
+.hex {
+  font-size: 0.71875rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--touch);
+  cursor: pointer;
+}
+
+.custom:has(input:focus-visible) .customButton {
+  outline: 2.5px solid var(--ev-text);
+  outline-offset: 2px;
+}
+
+.wheel {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: conic-gradient(#ff5a5f, #f7c548, #3dbe8b, #3d7bf7, #8e6cf0, #ff5a5f);
+  box-shadow: inset 0 0 0 3px var(--glass-strong);
+}
+
+.wheelActive {
+  box-shadow: inset 0 0 0 3px var(--glass-strong), 0 0 0 2px var(--fg);
+}
+
+.customText {
+  flex: 1;
+  font-size: var(--fs-ui);
+}
+
+.customButton {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  background: var(--glass-strong);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+}
+
+.colorInput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}

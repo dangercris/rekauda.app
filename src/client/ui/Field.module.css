@@ -1,0 +1,145 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-2);
+}
+
+.optional {
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+}
+
+.hint {
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--bad);
+}
+
+.error svg {
+  margin-top: 1px;
+}
+
+/* Shared control look (inputs, textarea, select) */
+.control {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-h);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  background: var(--glass-strong);
+  color: var(--fg);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.control:focus-within {
+  border-color: var(--ev-text);
+  box-shadow: 0 0 0 4px var(--ev-ring);
+}
+
+.control[data-invalid="true"] {
+  border-color: var(--bad);
+}
+
+.control[data-invalid="true"]:focus-within {
+  box-shadow: 0 0 0 4px var(--bad-bg);
+}
+
+.control[data-disabled="true"] {
+  opacity: 0.55;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  height: calc(var(--control-h) - 2px);
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-input);
+  color: inherit;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.input:focus-visible {
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.input:disabled {
+  cursor: not-allowed;
+}
+
+.textarea {
+  height: auto;
+  min-height: 76px;
+  padding: 12px 14px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.affix {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-input);
+  font-variant-numeric: tabular-nums;
+}
+
+.affix:first-child {
+  padding-left: 14px;
+  margin-right: -8px;
+}
+
+.affix:last-child {
+  padding-right: 14px;
+  margin-left: -8px;
+}
+
+.select {
+  padding-right: 42px;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+.selectWrap {
+  position: relative;
+}
+
+.chevron {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}

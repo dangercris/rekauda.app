@@ -1,0 +1,151 @@
+.intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-1) 0;
+}
+
+.eyebrow {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ev-text);
+}
+
+.title {
+  font-size: var(--fs-page);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+
+.lede {
+  color: var(--fg-2);
+  text-wrap: pretty;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+}
+
+.item {
+  display: block;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3-5);
+  min-height: 88px;
+  padding: var(--sp-3-5) var(--sp-3-5) var(--sp-3-5) var(--sp-3);
+  border-radius: var(--r-2xl);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.card:active {
+  transform: scale(0.99);
+}
+
+.closed {
+  opacity: 0.82;
+}
+
+.art {
+  position: relative;
+  align-self: stretch;
+  min-height: 56px;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--ev);
+}
+
+.cover,
+.toneArt {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.toneArt {
+  background:
+    radial-gradient(90% 80% at 85% 10%, var(--ev2) 0%, transparent 60%),
+    radial-gradient(80% 70% at 0% 100%, var(--ev3) 0%, transparent 65%),
+    var(--ev);
+}
+
+.closed .art {
+  filter: grayscale(0.6);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cardEyebrow {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ev-text);
+}
+
+.cardTitle {
+  font-size: var(--fs-title-sm);
+  font-weight: var(--fw-strong);
+  letter-spacing: var(--tracking-section);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.urgent {
+  color: var(--warn);
+  font-weight: var(--fw-semibold);
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2-5);
+  margin-top: 4px;
+}
+
+.progress > :first-child {
+  flex: 1;
+}
+
+.progressText {
+  flex: none;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+
+.chevron {
+  color: var(--muted);
+}

@@ -1,0 +1,268 @@
+/*
+  Design tokens · Recaudo Escolar.
+  Light is the default; dark follows prefers-color-scheme unless <html data-theme="light|dark"> forces one.
+  Any element can force a scheme for its subtree with data-theme (used by the gallery).
+  Event tone vars (--ev*) are set at runtime by <EventThemeProvider> / <ToneScope>; the values here are the
+  fallback for DEFAULT_TONE (#3D4FA3) computed with design/tone.ts.
+*/
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces and text */
+  --bg: #eef0f4;
+  --fg: #0e1117;
+  --fg-2: #394150;
+  --muted: #596170;
+  --line: rgba(14, 17, 23, 0.09);
+  --line-strong: rgba(14, 17, 23, 0.16);
+  /* Off switch track: 3:1 against the white knob (WCAG 1.4.11) */
+  --switch-off: #8c929c;
+  --surface-solid: #f8f9fb;
+
+  /* Liquid glass */
+  --glass: rgba(255, 255, 255, 0.56);
+  --glass-strong: rgba(255, 255, 255, 0.84);
+  --glass-solid: #fbfbfd;
+  --edge: rgba(255, 255, 255, 0.78);
+  --hi: rgba(255, 255, 255, 0.95);
+  --sheen: linear-gradient(155deg, rgba(255, 255, 255, 0.62) 0%, rgba(255, 255, 255, 0) 36%, rgba(255, 255, 255, 0) 72%, rgba(255, 255, 255, 0.26) 100%);
+  --shadow: 0 1px 2px rgba(14, 17, 23, 0.05), 0 14px 34px -12px rgba(14, 17, 23, 0.2);
+  --shadow-float: 0 1px 2px rgba(14, 17, 23, 0.06), 0 22px 44px -16px rgba(14, 17, 23, 0.32);
+  --sheet: rgba(246, 247, 250, 0.86);
+  --sheet-solid: #f6f7fa;
+  --selected: rgba(255, 255, 255, 0.92);
+  --selected-shadow: inset 0 1px 0 var(--hi), 0 4px 12px -6px rgba(0, 0, 0, 0.28);
+
+  /* Neutral action ("tinta") */
+  --ink: #0e1117;
+  --ink-fg: #ffffff;
+
+  /* Status (text / tinted background / solid fill) */
+  --ok: #0e7446;
+  --ok-bg: rgba(14, 116, 70, 0.12);
+  --ok-solid: #14935f;
+  --warn: #8f5300;
+  --warn-bg: rgba(230, 150, 20, 0.18);
+  --warn-solid: #f0a020;
+  --bad: #b3261e;
+  --bad-bg: rgba(179, 38, 30, 0.11);
+  --bad-solid: #c2362b;
+  --info: #1f5bb8;
+  --info-bg: rgba(31, 91, 184, 0.11);
+  --info-solid: #2f6fd6;
+  --void: #596170;
+  --void-bg: rgba(14, 17, 23, 0.07);
+  --badge: #f0a020;
+  --badge-fg: #1a1100;
+  --live: #5bf0a0;
+
+  /* Ambient light strength */
+  --amb: 0.55;
+  --blob: 0.3;
+
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #07080b;
+  --fg: #f4f5f8;
+  --fg-2: #cdd2dc;
+  --muted: #9aa2b0;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --switch-off: #4a4e5a;
+  --surface-solid: #111319;
+  --glass: rgba(28, 30, 38, 0.5);
+  --glass-strong: rgba(40, 42, 54, 0.82);
+  --glass-solid: #1b1d25;
+  --edge: rgba(255, 255, 255, 0.13);
+  --hi: rgba(255, 255, 255, 0.2);
+  --sheen: linear-gradient(155deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0) 36%, rgba(255, 255, 255, 0) 72%, rgba(255, 255, 255, 0.06) 100%);
+  --shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.75);
+  --shadow-float: 0 22px 50px -14px rgba(0, 0, 0, 0.85);
+  --sheet: rgba(18, 19, 25, 0.84);
+  --sheet-solid: #121319;
+  --selected: rgba(48, 50, 64, 0.85);
+  --selected-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 4px 12px -6px rgba(0, 0, 0, 0.5);
+  --ink: #f4f5f8;
+  --ink-fg: #0e1117;
+  --ok: #4ade94;
+  --ok-bg: rgba(74, 222, 148, 0.14);
+  --ok-solid: #16965f;
+  --warn: #ffb547;
+  --warn-bg: rgba(255, 181, 71, 0.15);
+  --warn-solid: #f0a020;
+  --bad: #ff7a70;
+  --bad-bg: rgba(255, 122, 112, 0.14);
+  --bad-solid: #c2362b;
+  --info: #8ab4ff;
+  --info-bg: rgba(138, 180, 255, 0.15);
+  --info-solid: #3b7be0;
+  --void: #9aa2b0;
+  --void-bg: rgba(255, 255, 255, 0.08);
+  --amb: 0.45;
+  --blob: 0.32;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #07080b;
+    --fg: #f4f5f8;
+    --fg-2: #cdd2dc;
+    --muted: #9aa2b0;
+    --line: rgba(255, 255, 255, 0.09);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --switch-off: #4a4e5a;
+    --surface-solid: #111319;
+    --glass: rgba(28, 30, 38, 0.5);
+    --glass-strong: rgba(40, 42, 54, 0.82);
+    --glass-solid: #1b1d25;
+    --edge: rgba(255, 255, 255, 0.13);
+    --hi: rgba(255, 255, 255, 0.2);
+    --sheen: linear-gradient(155deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0) 36%, rgba(255, 255, 255, 0) 72%, rgba(255, 255, 255, 0.06) 100%);
+    --shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.75);
+    --shadow-float: 0 22px 50px -14px rgba(0, 0, 0, 0.85);
+    --sheet: rgba(18, 19, 25, 0.84);
+    --sheet-solid: #121319;
+    --selected: rgba(48, 50, 64, 0.85);
+    --selected-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 4px 12px -6px rgba(0, 0, 0, 0.5);
+    --ink: #f4f5f8;
+    --ink-fg: #0e1117;
+    --ok: #4ade94;
+    --ok-bg: rgba(74, 222, 148, 0.14);
+    --ok-solid: #16965f;
+    --warn: #ffb547;
+    --warn-bg: rgba(255, 181, 71, 0.15);
+    --warn-solid: #f0a020;
+    --bad: #ff7a70;
+    --bad-bg: rgba(255, 122, 112, 0.14);
+    --bad-solid: #c2362b;
+    --info: #8ab4ff;
+    --info-bg: rgba(138, 180, 255, 0.15);
+    --info-solid: #3b7be0;
+    --void: #9aa2b0;
+    --void-bg: rgba(255, 255, 255, 0.08);
+    --amb: 0.45;
+    --blob: 0.32;
+  }
+}
+
+/*
+  Event tone fallback (DEFAULT_TONE #3D4FA3), declared only on the root so a nested data-theme
+  never overrides the vars an <EventThemeProvider> sets below it.
+*/
+:root {
+  --ev: #3d4fa3;
+  --ev-rgb: 61, 79, 163;
+  --ev-ink: #ffffff;
+  --ev-soft: rgba(61, 79, 163, 0.12);
+  --ev-text: #3d4fa3;
+  --ev-glass: rgba(61, 79, 163, 0.66);
+  --ev-ring: rgba(61, 79, 163, 0.22);
+  --ev-bar: #3d4fa3;
+  --ev2: #d6c15c;
+  --ev3: #8c72ca;
+}
+
+:root[data-theme="dark"] {
+  --ev-soft: rgba(61, 79, 163, 0.22);
+  --ev-text: #949ecc;
+  --ev-ring: rgba(61, 79, 163, 0.32);
+  --ev-bar: #949ecc;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ev-soft: rgba(61, 79, 163, 0.22);
+    --ev-text: #949ecc;
+    --ev-ring: rgba(61, 79, 163, 0.32);
+    --ev-bar: #949ecc;
+  }
+}
+
+/* Scheme-independent scales */
+:root {
+  /* Typography: Geist + Geist Mono. Sizes in rem so the user's font size is respected (16px base). */
+  --font-sans: "Geist", -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-micro: 0.6875rem; /* 11: tab bar labels */
+  --fs-caption: 0.75rem; /* 12: field captions, meta */
+  --fs-meta: 0.78125rem; /* 12.5: secondary lines, chips */
+  --fs-small: 0.8125rem; /* 13: labels, notes */
+  --fs-ui: 0.875rem; /* 14: buttons sm, list meta */
+  --fs-body: 0.9375rem; /* 15: body */
+  --fs-input: 1rem; /* 16: inputs, primary buttons (no iOS zoom) */
+  --fs-title-sm: 1.0625rem; /* 17: card titles, top bar */
+  --fs-section: 1.1875rem; /* 19: section titles */
+  --fs-value: 1.3125rem; /* 21: key values */
+  --fs-sheet: 1.5rem; /* 24: sheet title */
+  --fs-screen: 1.75rem; /* 28: success title */
+  --fs-page: 2.125rem; /* 34: admin page title */
+  --fs-stat: 2.25rem; /* 36: stat tiles */
+  --fs-display: 2.5rem; /* 40: event title */
+  --fs-amount: 2.875rem; /* 46: hero amount */
+  --lh-body: 1.45;
+  --tracking-display: -0.045em;
+  --tracking-title: -0.035em;
+  --tracking-section: -0.02em;
+  --tracking-eyebrow: 0.1em;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-strong: 650;
+  --fw-bold: 700;
+
+  /* Spacing (4px grid with the canvas half steps) */
+  --sp-1: 0.25rem;
+  --sp-1-5: 0.375rem;
+  --sp-2: 0.5rem;
+  --sp-2-5: 0.625rem;
+  --sp-3: 0.75rem;
+  --sp-3-5: 0.875rem;
+  --sp-4: 1rem;
+  --sp-4-5: 1.125rem;
+  --sp-5: 1.25rem;
+  --sp-6: 1.5rem;
+  --sp-8: 2rem;
+  --gutter: 1rem;
+
+  /* Radii */
+  --r-xs: 8px;
+  --r-sm: 12px;
+  --r-md: 16px;
+  --r-lg: 18px;
+  --r-xl: 22px;
+  --r-2xl: 26px;
+  --r-3xl: 28px;
+  --r-hero: 34px;
+  --r-pill: 999px;
+
+  /* Sizes */
+  --touch: 44px;
+  --control-h: 50px;
+  --button-h-sm: 40px;
+  --button-h-md: 50px;
+  --button-h-lg: 56px;
+  --content-max: 34rem;
+  --wide-max: 72rem;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.3, 1.4, 0.5, 1);
+  --dur-fast: 150ms;
+  --dur: 200ms;
+  --dur-slow: 250ms;
+
+  /* Layers */
+  --z-ambient: 0;
+  --z-content: 1;
+  --z-bar: 20;
+  --z-toast: 40;
+
+  /* Safe areas */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}

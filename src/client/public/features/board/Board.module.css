@@ -1,0 +1,52 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-1);
+}
+
+.title {
+  font-size: var(--fs-sheet);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.sub {
+  color: var(--fg-2);
+}
+
+.counts {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.big {
+  font-size: var(--fs-stat);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.of {
+  color: var(--muted);
+}
+
+.of strong {
+  color: var(--fg);
+  font-weight: var(--fw-semibold);
+}
+
+.staleNote {
+  font-size: var(--fs-small);
+  color: var(--muted);
+  text-align: center;
+}

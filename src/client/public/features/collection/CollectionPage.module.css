@@ -1,0 +1,112 @@
+/* Phones: the bottom tab bar floats over the page; toasts and the sticky action bar sit above it. */
+.page {
+  --tabbar-clear: calc(14px + 68px + 10px);
+}
+
+/* The toast region lives outside the page root, so the offset is set on <html> while this page is shown. */
+:global(html[data-public-tabbar]) {
+  --toast-offset: calc(14px + 68px + 10px);
+}
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.back {
+  align-self: flex-start;
+}
+
+.flow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.context {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.tabPanel {
+  min-width: 0;
+}
+
+.tabPanel[hidden] {
+  display: none;
+}
+
+.page .actionBar {
+  bottom: calc(var(--tabbar-clear) + var(--safe-bottom));
+}
+
+/* Keyboard up on a phone: the bar steps aside so it never covers the field being typed. */
+.page .actionBarTyping {
+  position: static;
+}
+
+.bottomTabs {
+  display: block;
+}
+
+.tabBar {
+  transition:
+    transform var(--dur-slow) var(--ease-out),
+    opacity var(--dur) var(--ease-out);
+}
+
+.tabBarHidden {
+  transform: translateY(calc(100% + 24px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 959.98px) {
+  .phoneHidden {
+    display: none;
+  }
+}
+
+@media (min-width: 960px) {
+  .page {
+    --tabbar-clear: 14px;
+  }
+
+  :global(html[data-public-tabbar]) {
+    --toast-offset: 16px;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 34rem);
+    align-items: start;
+    gap: var(--sp-8);
+  }
+
+  .context,
+  .bottomTabs {
+    display: none;
+  }
+
+  .page .actionBarTyping {
+    position: sticky;
+  }
+}
+
+@media (min-width: 1200px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 36rem);
+    gap: 2.5rem;
+  }
+}

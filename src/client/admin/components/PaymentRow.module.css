@@ -1,0 +1,36 @@
+.option {
+  color: var(--ev-text);
+  font-weight: var(--fw-semibold);
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.flags {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warn);
+  font-weight: var(--fw-semibold);
+}
+
+.flags svg {
+  flex: none;
+}
+
+.observation {
+  color: var(--bad);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mismatch {
+  color: var(--warn);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}

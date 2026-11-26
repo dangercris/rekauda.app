@@ -1,0 +1,115 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 960px) {
+  .list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 14px;
+  }
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.who {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.name {
+  font-size: var(--fs-value);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+
+.meta,
+.muted {
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--fs-small);
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.inlineError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--bad);
+  font-size: var(--fs-small);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.importTitle {
+  margin: 0;
+  font-size: var(--fs-value);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.02em;
+}
+
+.importOk,
+.importInfo,
+.importBad {
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.importOk {
+  color: var(--ok);
+}
+
+.importInfo {
+  color: var(--info);
+}
+
+.importBad {
+  color: var(--bad);
+}

@@ -1,0 +1,42 @@
+.money {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.display {
+  font-size: var(--fs-amount);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-display);
+  line-height: 1;
+}
+
+.display .cents {
+  font-size: 0.48em;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.02em;
+  color: var(--muted);
+}
+
+.stat {
+  font-size: var(--fs-stat);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.stat .cents {
+  font-size: 0.5em;
+  font-weight: var(--fw-semibold);
+  color: var(--muted);
+}
+
+.title {
+  font-size: var(--fs-value);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-section);
+  line-height: 1.15;
+}
+
+.inline {
+  font-weight: inherit;
+}

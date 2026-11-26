@@ -1,0 +1,206 @@
+.wrap {
+  /* How far the overlap card rises over the hero, and the air kept between the title block and that card. */
+  --hero-overlap: 76px;
+  --hero-overlap-gap: 22px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: var(--r-hero);
+  box-shadow: 0 34px 60px -30px var(--ev);
+  color: #ffffff;
+  background: #1a1c22;
+}
+
+.lg { height: 480px; }
+.md { height: 260px; border-radius: var(--r-3xl); box-shadow: 0 28px 50px -28px var(--ev); }
+.sm { height: 176px; border-radius: 17px; box-shadow: none; }
+
+.cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -2;
+}
+
+/* Tone-only artwork when there is no cover */
+.toneArt {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  overflow: hidden;
+  background: var(--ev);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--ev) 88%, #fff) 0%, var(--ev) 38%, color-mix(in srgb, var(--ev) 55%, #000) 100%);
+}
+
+.artBlob1,
+.artBlob2,
+.artRing {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.artBlob1 {
+  width: 70%;
+  aspect-ratio: 1;
+  right: -18%;
+  top: -14%;
+  background: var(--ev2);
+  filter: blur(48px);
+  opacity: 0.75;
+}
+
+.artBlob2 {
+  width: 64%;
+  aspect-ratio: 1;
+  left: -20%;
+  top: 30%;
+  background: var(--ev3);
+  filter: blur(56px);
+  opacity: 0.6;
+}
+
+.artRing {
+  width: 120%;
+  aspect-ratio: 1;
+  left: 10%;
+  top: -40%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 28px rgba(255, 255, 255, 0.04);
+}
+
+.topScrim {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 34%;
+  z-index: -1;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+.top {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.topSlot {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.topEnd {
+  justify-content: flex-end;
+}
+
+.content {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 22px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.withOverlap .content {
+  bottom: calc(var(--hero-overlap) + var(--hero-overlap-gap));
+}
+
+/* Scrim behind the text block: extends upward from the block so contrast does not depend on the photo. */
+.content::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: -60px;
+  right: -60px;
+  top: -96px;
+  bottom: -240px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0.62) 96px, rgba(0, 0, 0, 0.86) 100%);
+  pointer-events: none;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.eyebrow {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.title {
+  font-size: var(--fs-display);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.04em;
+  line-height: 1;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+.md .title {
+  font-size: 1.6875rem;
+  line-height: 1.02;
+}
+
+.md .eyebrow {
+  font-size: var(--fs-micro);
+}
+
+.md .content {
+  left: 18px;
+  right: 18px;
+  bottom: 18px;
+}
+
+.sm .title {
+  font-size: var(--fs-screen);
+  line-height: 0.95;
+  letter-spacing: var(--tracking-display);
+}
+
+.sm .content {
+  left: 16px;
+  right: 16px;
+  bottom: 14px;
+}
+
+.description {
+  max-width: 300px;
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  opacity: 0.92;
+}
+
+.aside {
+  flex: none;
+}
+
+.overlap {
+  position: relative;
+  margin: calc(-1 * var(--hero-overlap)) 12px 0;
+}
+
+@media (min-width: 960px) {
+  .lg {
+    height: 520px;
+  }
+}

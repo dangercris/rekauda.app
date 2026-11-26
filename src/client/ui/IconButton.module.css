@@ -1,0 +1,85 @@
+.iconButton {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--fg);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    transform var(--dur) var(--ease-out),
+    opacity var(--dur) var(--ease-out);
+}
+
+.iconButton:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.iconButton:disabled {
+  opacity: 0.45;
+}
+
+/* Keep a 44px hit area for the smaller circles */
+.iconButton::before {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.s36 {
+  width: 36px;
+  height: 36px;
+}
+.s40 {
+  width: 40px;
+  height: 40px;
+}
+.s44 {
+  width: 44px;
+  height: 44px;
+}
+
+/* Fills from materials.css; restate their text colors because .iconButton sets one */
+.ink {
+  color: var(--ink-fg);
+}
+
+.event {
+  color: var(--ev-ink);
+}
+
+.soft {
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--fg-2);
+}
+
+@media (hover: hover) {
+  .ghost:hover:not(:disabled) {
+    background: var(--line);
+  }
+}
+
+.on_image {
+  color: #ffffff;
+}
+
+.dot {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--badge);
+  box-shadow: 0 0 0 2px var(--glass-strong);
+}

@@ -1,0 +1,60 @@
+.create {
+  max-width: 100%;
+}
+
+@media (min-width: 640px) {
+  .create {
+    width: auto;
+    align-self: flex-start;
+  }
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.archivedHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 16px;
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.meta strong {
+  color: var(--fg-2);
+  font-weight: var(--fw-semibold);
+}
+
+.options {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 12px 14px;
+}
+
+.confirm {
+  margin: 8px 12px 12px;
+}

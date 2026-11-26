@@ -1,0 +1,94 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: var(--touch);
+  padding: 10px 0;
+  cursor: pointer;
+  font-size: var(--fs-body);
+  line-height: 1.4;
+}
+
+.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.boxWrap {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -1px;
+}
+
+.input {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-xs);
+  border: 1.5px solid var(--line-strong);
+  background: var(--glass-strong);
+  cursor: inherit;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.input:checked {
+  background: var(--ev);
+  border-color: var(--ev);
+}
+
+.input:focus-visible {
+  outline: 2.5px solid var(--ev-text);
+  outline-offset: 2px;
+}
+
+.invalid {
+  border-color: var(--bad);
+}
+
+.check {
+  position: absolute;
+  inset: 4px;
+  color: var(--ev-ink);
+  opacity: 0;
+  transform: scale(0.6);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur) var(--ease-out);
+}
+
+.input:checked + .check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.label {
+  min-width: 0;
+}
+
+.hint {
+  padding-left: 36px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.error {
+  display: flex;
+  gap: 6px;
+  padding-left: 36px;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--bad);
+}

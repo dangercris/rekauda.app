@@ -1,0 +1,11 @@
+export { BANKS, CLASS_NAME, DEFAULT_TONE, EARLIEST_TRANSFER, EARLIEST_TRANSFER_LABEL, SCHOOL_NAME, TREASURY } from "../shared/instance";
+
+export const MAX_FILE_BYTES = 5 * 1024 * 1024;
+export const MAX_BODY_BYTES = 6 * 1024 * 1024;
+export const MAX_JSON_BYTES = 4096;
+export const MAX_COLLECTION_JSON_BYTES = 16 * 1024;
+export const SESSION_TTL_S = 6 * 60 * 60;
+export const MAX_ACTIVE_PAYMENTS = 150;
+export const DEFAULT_MAX_PER_PAYMENT = 4;
+export const SESSION_COOKIE = "adm";
+export const COVER_PREFIX = "covers/";

@@ -1,0 +1,76 @@
+.group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 5px;
+  border-radius: var(--r-xl);
+}
+
+@media (min-width: 640px) {
+  .group {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+.segment {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-width: 0;
+  height: 54px;
+  padding: 0 4px;
+  border-radius: 17px;
+  color: var(--muted);
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur) var(--ease-out),
+    color var(--dur) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .segment:not(.selected):hover {
+    background: var(--line);
+  }
+}
+
+.selected {
+  background: var(--selected);
+  box-shadow: var(--selected-shadow);
+  color: var(--fg);
+}
+
+.countRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.count {
+  font-size: var(--fs-title-sm);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.label {
+  max-width: 100%;
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.icon {
+  flex: none;
+}
+
+/* The status icon carries the status color (never color alone: the label is always there). */
+.warn .icon { color: var(--warn); }
+.info .icon { color: var(--info); }
+.bad .icon { color: var(--bad); }
+.ok .icon { color: var(--ok); }
+.void .icon { color: var(--void); }
+.all .icon { color: var(--fg-2); }

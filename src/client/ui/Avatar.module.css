@@ -1,0 +1,25 @@
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.02em;
+  line-height: 1;
+  user-select: none;
+}
+
+.s34 { width: 34px; height: 34px; font-size: var(--fs-caption); }
+.s42 { width: 42px; height: 42px; font-size: var(--fs-ui); }
+.s56 { width: 56px; height: 56px; font-size: 1.125rem; }
+
+.soft {
+  background: var(--ev-soft);
+  color: var(--ev-text);
+  box-shadow: inset 0 0 0 1.5px var(--ev-soft);
+}
+
+.solid {
+  background: var(--ev);
+  color: var(--ev-ink);
+}

@@ -1,0 +1,38 @@
+.switcher {
+  display: flex;
+  gap: 8px;
+  margin: 0 calc(-1 * var(--gutter));
+  padding: 2px var(--gutter) 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-padding-inline: var(--gutter);
+  -webkit-overflow-scrolling: touch;
+}
+
+.switcher::-webkit-scrollbar {
+  display: none;
+}
+
+.item {
+  display: contents;
+}
+
+.chip {
+  flex: none;
+  max-width: 16rem;
+  white-space: nowrap;
+}
+
+.closed {
+  font-weight: var(--fw-medium);
+  opacity: 0.8;
+}
+
+@media (min-width: 960px) {
+  .switcher {
+    flex-wrap: wrap;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+  }
+}

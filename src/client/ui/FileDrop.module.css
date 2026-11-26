@@ -1,0 +1,157 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.zone,
+.selected {
+  border-radius: var(--r-xl);
+  border: 1.5px dashed var(--ev-text);
+  background: var(--ev-soft);
+  transition:
+    background-color var(--dur) var(--ease-out),
+    border-color var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out);
+}
+
+.zone {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 104px;
+  padding: 16px;
+  cursor: pointer;
+}
+
+.zone:active {
+  transform: scale(0.99);
+}
+
+.zone:has(input:focus-visible),
+.selected:has(input:focus-visible) {
+  outline: 2.5px solid var(--ev-text);
+  outline-offset: 2px;
+}
+
+.dragging {
+  border-style: solid;
+  background: var(--ev-ring);
+}
+
+.invalid {
+  border-color: var(--bad);
+  background: var(--bad-bg);
+}
+
+.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.zoneIcon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+}
+
+.zoneText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.zoneTitle {
+  font-weight: var(--fw-semibold);
+}
+
+.zoneHint {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.selected {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+}
+
+.thumb {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 58px;
+  height: 78px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #596170;
+  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.35);
+}
+
+.thumbImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  font-size: 0.90625rem;
+  font-weight: var(--fw-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.size {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.ready,
+.processing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-semibold);
+  color: var(--ok);
+}
+
+.processing {
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-semibold);
+  color: var(--bad);
+}
+
+.error svg {
+  margin-top: 1px;
+}

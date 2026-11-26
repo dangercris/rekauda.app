@@ -1,0 +1,55 @@
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 24px;
+  animation: appear var(--dur-slow) var(--ease-out);
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.title {
+  font-size: var(--fs-body);
+  font-weight: var(--fw-strong);
+}
+
+.title:focus-visible {
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.description {
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+.cancel,
+.ok {
+  /* Long Spanish labels wrap to two lines instead of overflowing on 360px screens */
+  min-width: 0;
+  height: auto;
+  min-height: var(--button-h-md);
+  padding-block: 8px;
+  white-space: normal;
+}
+
+.cancel {
+  flex: 1 1 0;
+  border-radius: var(--r-md);
+}
+
+.ok {
+  flex: 1.4 1 0;
+  border-radius: var(--r-md);
+}
