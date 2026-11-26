@@ -49,11 +49,11 @@ export function getConsentState(): ConsentState {
   return current();
 }
 
-/** Stores the choice (memory wins when storage fails), applies it to gtag and closes the banner. */
-export function setConsent(choice: ConsentChoice): void {
+/** Stores the choice (memory wins when storage fails), applies it to gtag for the tenant's id and closes the banner. */
+export function setConsent(choice: ConsentChoice, measurementId: string | null): void {
   writeJson(CONSENT_KEY, { choice, version: CONSENT_VERSION } satisfies StoredConsent);
   update({ choice, preferencesOpen: false });
-  applyConsent(choice);
+  applyConsent(choice, measurementId);
 }
 
 /** Reopens the banner (footer "Preferencias de cookies"). */

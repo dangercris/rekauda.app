@@ -3,6 +3,7 @@ import type { AdminCollection, CollectionStatus } from "../../../shared/api";
 import { EventThemeProvider } from "../../design";
 import { createCollection, deleteCover, errorMessage, updateCollection, uploadCover } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
+import { useInstanceConfig } from "../../lib/config/useInstance";
 import { formatMoney, longDate } from "../../lib/format";
 import { navigate } from "../../lib/router";
 import {
@@ -25,7 +26,7 @@ import {
   TopBar,
   useToast,
 } from "../../ui";
-import { CLASS_LABEL } from "../components/common";
+import { useEyebrow } from "../components/common";
 import { useAdminData } from "../data/AdminData";
 import { useUnsavedGuard } from "../navigation";
 import { useApiErrorGate } from "../session/SessionContext";
@@ -116,9 +117,11 @@ export interface EventEditorProps {
 export function EventEditor({ collection }: EventEditorProps) {
   const { upsert, reload } = useAdminData().collections;
   const { select } = useAdminData();
+  const { defaultTone } = useInstanceConfig();
+  const treasuryEyebrow = useEyebrow();
   const gate = useApiErrorGate();
   const toast = useToast();
-  const [state, dispatch] = useReducer(editorReducer, collection, initEditor);
+  const [state, dispatch] = useReducer(editorReducer, undefined, () => initEditor(collection, defaultTone));
   const [saving, setSaving] = useState(false);
   const [coverBusy, setCoverBusy] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
@@ -197,7 +200,7 @@ export function EventEditor({ collection }: EventEditorProps) {
     }
     setSaving(true);
     try {
-      const input = toInput(draft);
+      const input = toInput(draft, state.defaultTone);
       let saved: AdminCollection;
       if (collection) {
         saved = (await updateCollection(collection.id, input)).collection;
@@ -523,7 +526,7 @@ export function EventEditor({ collection }: EventEditorProps) {
         <section className={styles.shareArea} aria-hidden="true">
           <h2 className={styles.cardTitle}>Vista previa en WhatsApp</h2>
           <Card radius="xl" padding="sm" gap={8}>
-            <Hero size="sm" headingLevel={2} eyebrow={`Tesorería · ${CLASS_LABEL}`} title={title} aside={price ? <Chip variant="event" size="sm">{price}</Chip> : undefined} />
+            <Hero size="sm" headingLevel={2} eyebrow={treasuryEyebrow} title={title} aside={price ? <Chip variant="event" size="sm">{price}</Chip> : undefined} />
             <span className={styles.shareText}>
               <strong>{price ? `${title} · ${price}` : title}</strong>
               <span className={styles.muted}>

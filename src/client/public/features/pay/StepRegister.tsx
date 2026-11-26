@@ -14,7 +14,7 @@ import styles from "./Pay.module.css";
 export interface StepRegisterProps {
   collection: CollectionDetail;
   flow: PayFlow;
-  banks: readonly string[] | null;
+  banks: readonly string[];
   /** Shown again, collapsed, so the parent can check the account without leaving the form. */
   treasury: TreasuryAccount;
   onBack: () => void;
@@ -31,7 +31,7 @@ export function StepRegister({ collection, flow, banks, treasury, onBack, action
   const today = todayEc();
   const atMax = students.length >= state.max;
   const fieldId = (key: FieldKey) => `pay-${key.replace(/\./g, "-")}`;
-  const bankOptions = (banks ?? (fields.bank ? [fields.bank] : [])).map((b) => ({ value: b, label: b }));
+  const bankOptions = banks.map((b) => ({ value: b, label: b }));
   const processing = state.receipt?.status === "processing";
   const issueCount = Object.keys(errors).length;
 

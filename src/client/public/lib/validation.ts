@@ -3,7 +3,6 @@
  * parseTransferDate, parseAmount, parseReference, parseStudents). Problems are shown on each field before
  * the request is sent; the server stays the source of truth and its message is shown if it still rejects.
  */
-import { EARLIEST_TRANSFER, EARLIEST_TRANSFER_LABEL } from "../../../shared/instance-bundled";
 import { parseAmountCents, todayEc } from "../../lib/format";
 
 /** Same as the worker's cleanText: NFC, control chars to spaces, collapsed whitespace, trimmed. */
@@ -41,10 +40,10 @@ const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type DateProblem = "missing" | "future" | "too_old" | null;
 
-export function transferDateProblem(value: string, now: Date = new Date()): DateProblem {
+export function transferDateProblem(value: string, earliestTransferDate: string, now: Date = new Date()): DateProblem {
   if (!YMD_RE.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) return "missing";
   if (value > todayEc(now)) return "future";
-  if (value < EARLIEST_TRANSFER) return "too_old";
+  if (value < earliestTransferDate) return "too_old";
   return null;
 }
 
@@ -99,8 +98,11 @@ export interface PaymentValues {
 
 export interface ValidationContext {
   optionKeys: readonly string[];
-  /** Null while the bank list is unknown (config still loading): only emptiness is checked. */
-  banks: readonly string[] | null;
+  /** The tenant's bank list. */
+  banks: readonly string[];
+  /** The tenant's earliest accepted transfer date (YYYY-MM-DD) and its Spanish month and year for messages. */
+  earliestTransferDate: string;
+  earliestTransferLabel: string;
   now?: Date | undefined;
 }
 
@@ -180,12 +182,12 @@ export function validatePayment(values: PaymentValues, ctx: ValidationContext): 
   if (amount === "invalid") add("amount", "Escribe el monto con números, por ejemplo 14,00.", "Escribe el monto transferido.");
   else if (amount === "range") add("amount", "El monto transferido no parece correcto.", "Revisa el monto transferido.");
 
-  const date = transferDateProblem(values.transferDate, ctx.now);
+  const date = transferDateProblem(values.transferDate, ctx.earliestTransferDate, ctx.now);
   if (date === "missing") add("transferDate", "Elige la fecha.", "Escribe la fecha de la transferencia.");
   else if (date === "future") add("transferDate", "La fecha no puede ser futura.", "La fecha de la transferencia no puede ser futura.");
-  else if (date === "too_old") add("transferDate", `La fecha no puede ser anterior a ${EARLIEST_TRANSFER_LABEL}.`, "Revisa la fecha de la transferencia.");
+  else if (date === "too_old") add("transferDate", `La fecha no puede ser anterior a ${ctx.earliestTransferLabel}.`, "Revisa la fecha de la transferencia.");
 
-  if (!values.bank || (ctx.banks !== null && !ctx.banks.includes(values.bank))) {
+  if (!values.bank || !ctx.banks.includes(values.bank)) {
     add("bank", "Elige tu banco o cooperativa.", "Elige el banco desde el que transferiste.");
   }
 

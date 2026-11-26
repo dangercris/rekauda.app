@@ -13,10 +13,12 @@ import {
   type EditorState,
 } from "./editorState";
 
+const TONE = "#112233";
+
 const run = (state: EditorState, ...actions: EditorAction[]): EditorState => actions.reduce(editorReducer, state);
 
 function validNew(): EditorState {
-  const start = initEditor(null);
+  const start = initEditor(null, TONE);
   const uid = start.draft.options[0]?.uid ?? "";
   return run(
     start,
@@ -30,7 +32,7 @@ function validNew(): EditorState {
 
 describe("event editor state", () => {
   it("suggests the slug from the title until the slug is edited", () => {
-    let s = run(initEditor(null), { type: "field", field: "title", value: "Ágape de Navidad: ¡5.º B!" });
+    let s = run(initEditor(null, TONE), { type: "field", field: "title", value: "Ágape de Navidad: ¡5.º B!" });
     expect(s.draft.slug).toBe("agape-de-navidad-5-b");
     s = run(s, { type: "field", field: "slug", value: "navidad" }, { type: "field", field: "title", value: "Otro título" });
     expect(s.draft.slug).toBe("navidad");
@@ -50,7 +52,7 @@ describe("event editor state", () => {
   });
 
   it("derives option keys for new rows, keeps existing keys read-only, and rejects duplicates", () => {
-    const edit = initEditor(makeCollection());
+    const edit = initEditor(makeCollection(), TONE);
     const locked = edit.draft.options[0];
     let s = run(edit, { type: "option", uid: locked?.uid ?? "", field: "label", value: "Vestido" }, { type: "option", uid: locked?.uid ?? "", field: "key", value: "otro" });
     expect(s.draft.options[0]?.key).toBe("mujer");
@@ -71,7 +73,7 @@ describe("event editor state", () => {
     expect(price("$ 1.000,00")).toBeUndefined();
     expect(price("0,50")).toMatch(/\$1,00/);
     expect(price("catorce")).toMatch(/precio/);
-    expect(toInput(run(s, { type: "option", uid, field: "price", value: "14,5" }).draft).options[0]?.cents).toBe(1450);
+    expect(toInput(run(s, { type: "option", uid, field: "price", value: "14,5" }).draft, TONE).options[0]?.cents).toBe(1450);
   });
 
   it("limits notes to six non-empty lines of 200 characters", () => {
@@ -80,11 +82,11 @@ describe("event editor state", () => {
     expect(validateDraft(run(s, { type: "field", field: "notes", value: `${six}\n\n  \n` }).draft).notes).toBeUndefined();
     expect(validateDraft(run(s, { type: "field", field: "notes", value: `${six}\nNota 7` }).draft).notes).toMatch(/hasta 6/);
     expect(validateDraft(run(s, { type: "field", field: "notes", value: "x".repeat(201) }).draft).notes).toMatch(/200/);
-    expect(toInput(run(s, { type: "field", field: "notes", value: " Uno \n\nDos" }).draft).notes).toEqual(["Uno", "Dos"]);
+    expect(toInput(run(s, { type: "field", field: "notes", value: " Uno \n\nDos" }).draft, TONE).notes).toEqual(["Uno", "Dos"]);
   });
 
   it("keeps between 1 and 6 options", () => {
-    let s = initEditor(null);
+    let s = initEditor(null, TONE);
     s = run(s, { type: "removeOption", uid: s.draft.options[0]?.uid ?? "" });
     expect(s.draft.options).toHaveLength(1);
     for (let i = 0; i < 8; i += 1) s = run(s, { type: "addOption" });
@@ -92,7 +94,7 @@ describe("event editor state", () => {
   });
 
   it("tracks unsaved changes against the loaded collection", () => {
-    const s = initEditor(makeCollection());
+    const s = initEditor(makeCollection(), TONE);
     expect(isDirty(s)).toBe(false);
     expect(isDirty(run(s, { type: "tone", value: "#3d4fa3" }))).toBe(true);
     expect(isDirty(run(s, { type: "field", field: "title", value: "Vestuario del musical " }))).toBe(false);
@@ -110,7 +112,7 @@ describe("event editor state", () => {
   });
 
   it("maps server rejections to fields", () => {
-    const s = initEditor(makeCollection());
+    const s = initEditor(makeCollection(), TONE);
     const second = s.draft.options[1]?.uid ?? "";
     expect(mapServerError(new ApiRequestError(409, "slug_taken", "Ya existe una recaudación con ese enlace."), s.draft).errors.slug).toMatch(/Ya existe/);
     expect(mapServerError(new ApiRequestError(409, "option_in_use", 'La opción "mujer" ya tiene estudiantes.'), s.draft).errors.options).toMatch(/mujer/);
@@ -125,19 +127,19 @@ describe("event editor Deuna link", () => {
 
   it("sends the link and expiry in the request body, empty as null", () => {
     const base = validNew();
-    expect(toInput(base.draft)).toMatchObject({ deunaLink: null, deunaLinkExpires: null });
+    expect(toInput(base.draft, TONE)).toMatchObject({ deunaLink: null, deunaLinkExpires: null });
     const s = run(base, { type: "field", field: "deunaLink", value: `  ${LINK} ` }, { type: "field", field: "deunaLinkExpires", value: "2026-12-26" });
     expect(validateDraft(s.draft)).toEqual({});
-    expect(toInput(s.draft)).toMatchObject({ deunaLink: LINK, deunaLinkExpires: "2026-12-26" });
+    expect(toInput(s.draft, TONE)).toMatchObject({ deunaLink: LINK, deunaLinkExpires: "2026-12-26" });
   });
 
   it("drops the expiry when there is no link", () => {
     const s = run(validNew(), { type: "field", field: "deunaLinkExpires", value: "2026-12-26" });
-    expect(toInput(s.draft)).toMatchObject({ deunaLink: null, deunaLinkExpires: null });
+    expect(toInput(s.draft, TONE)).toMatchObject({ deunaLink: null, deunaLinkExpires: null });
   });
 
   it("loads an existing link and tracks it as unsaved changes", () => {
-    const s = initEditor(makeCollection({ deunaLink: LINK, deunaLinkExpires: "2026-12-26" }));
+    const s = initEditor(makeCollection({ deunaLink: LINK, deunaLinkExpires: "2026-12-26" }), TONE);
     expect(s.draft).toMatchObject({ deunaLink: LINK, deunaLinkExpires: "2026-12-26" });
     expect(isDirty(s)).toBe(false);
     expect(isDirty(run(s, { type: "field", field: "deunaLinkExpires", value: "2026-12-27" }))).toBe(true);
@@ -154,8 +156,28 @@ describe("event editor Deuna link", () => {
   });
 
   it("maps server rejections to the Deuna fields", () => {
-    const d = initEditor(makeCollection()).draft;
+    const d = initEditor(makeCollection(), TONE).draft;
     expect(mapServerError(new ApiRequestError(400, "invalid_collection", "El link de cobro de Deuna no debe tener espacios."), d).errors.deunaLink).toBeDefined();
     expect(mapServerError(new ApiRequestError(400, "invalid_collection", "Escribe una fecha de vencimiento válida para el link de Deuna."), d).errors.deunaLinkExpires).toBeDefined();
+  });
+});
+
+describe("tenant default tone", () => {
+  it("starts a new event with the tenant's tone", () => {
+    expect(initEditor(null, "#0B7A73").draft.tone).toBe("#0B7A73");
+    expect(initEditor(null, "#C81E3A").draft.tone).toBe("#C81E3A");
+  });
+
+  it("falls back to the tenant's tone for an invalid stored or typed tone", () => {
+    const stored = initEditor(makeCollection({ tone: "not-a-color" }), "#0B7A73");
+    expect(stored.draft.tone).toBe("#0B7A73");
+    const broken = { ...initEditor(null, "#C81E3A").draft, tone: "zzz" };
+    expect(toInput(broken, "#C81E3A").tone).toBe("#C81E3A");
+    expect(toInput(broken, "#0B7A73").tone).toBe("#0B7A73");
+  });
+
+  it("keeps the tenant's tone when the editor resets after saving", () => {
+    const s = run(initEditor(null, "#0B7A73"), { type: "reset", collection: null });
+    expect(s.draft.tone).toBe("#0B7A73");
   });
 });

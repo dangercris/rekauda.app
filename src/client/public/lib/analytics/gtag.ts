@@ -3,7 +3,6 @@
  * calls live here and only the Google library itself is loaded through a <script src>.
  * Nothing in this module runs until consent is granted.
  */
-import { GA_MEASUREMENT_ID } from "./config";
 import { isAnalyticsEnabled } from "./enabled";
 
 const SCRIPT_URL = "https://www.googletagmanager.com/gtag/js";
@@ -19,6 +18,8 @@ declare global {
 
 let configured = false;
 let active = false;
+/** The id gtag was last granted for, so a later "denied" switches off that same id. */
+let activeId: string | null = null;
 
 function gtag(...args: unknown[]): void {
   window.dataLayer = window.dataLayer ?? [];
@@ -45,8 +46,7 @@ function setDisabled(id: string, disabled: boolean): void {
   Reflect.set(window, `ga-disable-${id}`, disabled);
 }
 
-function grant(): void {
-  const id = GA_MEASUREMENT_ID;
+function grant(id: string): void {
   setDisabled(id, false);
   if (!configured) {
     // Consent Mode v2: everything denied by default, only analytics storage is granted after "Aceptar".
@@ -60,6 +60,7 @@ function grant(): void {
   }
   appendScript(id);
   active = true;
+  activeId = id;
 }
 
 /** Best-effort removal of the GA cookies on the host and its parent domains. */
@@ -84,23 +85,26 @@ export function deleteGaCookies(): void {
   }
 }
 
-function revoke(): void {
+function revoke(id: string): void {
   active = false;
-  setDisabled(GA_MEASUREMENT_ID, true);
+  setDisabled(id, true);
   if (configured) gtag("consent", "update", { analytics_storage: "denied" });
   deleteGaCookies();
 }
 
-/** Applies a consent choice: granted loads and configures gtag once, denied stops everything. */
-export function applyConsent(choice: ConsentChoice | null): void {
-  if (!isAnalyticsEnabled() || choice === null) return;
-  if (choice === "granted") grant();
-  else revoke();
+/**
+ * Applies a consent choice for the tenant's Measurement ID: granted loads and configures gtag once, denied stops
+ * everything. A null or invalid id (analytics off for this tenant) does nothing at all.
+ */
+export function applyConsent(choice: ConsentChoice | null, measurementId: string | null): void {
+  if (!isAnalyticsEnabled(measurementId) || choice === null) return;
+  if (choice === "granted") grant(measurementId);
+  else revoke(measurementId);
 }
 
 /** True while consent is granted and gtag is configured. */
 export function isGtagActive(): boolean {
-  return active && isAnalyticsEnabled();
+  return active && activeId !== null;
 }
 
 export function sendEvent(name: string, params: Record<string, unknown>): void {
@@ -116,4 +120,5 @@ export function sendPageView(path: string, title: string): void {
 export function resetGtagForTests(): void {
   configured = false;
   active = false;
+  activeId = null;
 }

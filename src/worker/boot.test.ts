@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ConfigResponse } from "../shared/api";
+import { parseConfigResponse } from "../shared/config-response";
 import { bootJson, renderShell, serveShell, servePage } from "./boot";
 import type { CloudEnv } from "./env";
 import { toPublicConfig } from "./public-config";
@@ -34,6 +35,16 @@ describe("bootJson", () => {
     expect(out).not.toContain("<");
     expect(out).not.toContain(" ");
     expect((JSON.parse(out) as ConfigResponse).schoolName).toBe(hostile);
+  });
+});
+
+describe("boot JSON and the client parser", () => {
+  it("round-trips what the Worker emits, in both sign-in modes and with a qr path", () => {
+    for (const mode of ["single", "multi"] as const) {
+      const config = toPublicConfig(withInstance({ schoolName: hostile.slice(-9) }), mode);
+      const withQr = { ...config, treasury: { ...config.treasury, qrUrl: "/api/assets/deuna-qr.png?v=1" } };
+      expect(parseConfigResponse(JSON.parse(bootJson(withQr)), "boot")).toEqual(withQr);
+    }
   });
 });
 

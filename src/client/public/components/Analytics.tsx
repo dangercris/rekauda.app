@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useRoute } from "../../lib/router";
-import { applyConsent, isAnalyticsEnabled, sendPageView, useConsent } from "../lib/analytics";
+import { useInstanceConfig } from "../../lib/config/useInstance";
+import { applyConsent, sendPageView, useAnalyticsEnabled, useConsent } from "../lib/analytics";
 import { ConsentBanner } from "./ConsentBanner";
 
 /**
@@ -10,12 +11,13 @@ import { ConsentBanner } from "./ConsentBanner";
 export function Analytics() {
   const route = useRoute();
   const { choice } = useConsent();
-  const enabled = isAnalyticsEnabled();
+  const { gaMeasurementId } = useInstanceConfig().analytics;
+  const enabled = useAnalyticsEnabled();
   const path = route.path + (route.hash ? `#${route.hash}` : "");
 
   useEffect(() => {
-    if (enabled) applyConsent(choice);
-  }, [enabled, choice]);
+    if (enabled) applyConsent(choice, gaMeasurementId);
+  }, [enabled, choice, gaMeasurementId]);
 
   useEffect(() => {
     if (!enabled || choice !== "granted") return undefined;

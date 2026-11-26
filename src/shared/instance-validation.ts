@@ -9,6 +9,7 @@ const MAX_TEXT = 200;
 const UNSAFE_CHARS = /[\p{Cc}\u202A-\u202E\u2066-\u2069]/u;
 const MAX_URL = 2048;
 const MAX_ACCOUNT = 32;
+const MAX_BANKS = 50;
 
 /** Pure and dependency free: it runs when the config module loads, in the Worker, the client bundle and tests. */
 export function validateInstanceConfig(config: InstanceConfig, source = "rekauda.config.ts"): InstanceConfig {
@@ -41,11 +42,13 @@ export function validateInstanceConfig(config: InstanceConfig, source = "rekauda
   url("treasury.qrUrl", t.qrUrl);
   url("treasury.deunaUrl", t.deunaUrl);
   url("treasury.helpUrl", t.helpUrl);
-  if (t.qrUrl !== null && !t.qrUrl.startsWith("/")) fail("treasury.qrUrl", "must be null or a same-origin path starting with /");
+  // "//host" and "/\\host" are read by browsers as another origin.
+  if (t.qrUrl !== null && !/^\/(?![/\\])/.test(t.qrUrl)) fail("treasury.qrUrl", "must be null or a same-origin path starting with /");
   if (t.deunaUrl !== null && !/^https:\/\//.test(t.deunaUrl)) fail("treasury.deunaUrl", "must be null or an https URL");
   if (t.helpUrl !== null && !/^https:\/\//.test(t.helpUrl)) fail("treasury.helpUrl", "must be null or an https URL");
 
   if (config.banks.length === 0 || config.banks.some((b) => typeof b !== "string" || b.trim() === "")) fail("banks", "must be a non-empty list of names");
+  if (config.banks.length > MAX_BANKS) fail("banks", `must have at most ${MAX_BANKS} names`);
   if (config.banks.some((b) => b.length > MAX_TEXT)) fail("banks", `names must be at most ${MAX_TEXT} characters`);
   if (config.banks.some((b) => UNSAFE_CHARS.test(b))) fail("banks", "names must not contain control or bidirectional characters");
   if (new Set(config.banks).size !== config.banks.length) fail("banks", "must not contain duplicates");

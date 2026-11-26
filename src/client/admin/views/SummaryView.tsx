@@ -24,7 +24,7 @@ import {
 } from "../../ui";
 import { CollectionCard } from "../components/CollectionCard";
 import { CollectionSwitcher } from "../components/CollectionSwitcher";
-import { EYEBROW, ErrorState, HeaderActions, ListSkeleton } from "../components/common";
+import { ErrorState, HeaderActions, ListSkeleton, useEyebrow } from "../components/common";
 import { PaymentRow } from "../components/PaymentRow";
 import { useAdminData } from "../data/AdminData";
 import { centsWithStatus, countByStatus, recentActivity, type ActivityKind } from "../data/payments";
@@ -44,13 +44,14 @@ const ACTIVITY: Record<ActivityKind, { title: string; icon: IconName; tone: Tone
 
 /** AdminResumen: money collected for the selected collection, status counts, review queue, collections, activity. */
 export function SummaryView() {
+  const eyebrow = useEyebrow();
   const { collections, pickable, selected, select, payments, refreshAll } = useAdminData();
   const onLogout = useLogout();
   const refreshing = collections.refreshing || payments.refreshing;
 
   const header = (
     <PageHeader
-      eyebrow={EYEBROW}
+      eyebrow={eyebrow}
       title="Resumen"
       subtitle={capitalize(longDate(new Date()))}
       actions={<HeaderActions onRefresh={() => void refreshAll()} refreshing={refreshing} onLogout={onLogout} />}

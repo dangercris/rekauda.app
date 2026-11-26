@@ -1,11 +1,10 @@
 import { useEffect, useRef } from "react";
-import { CLASS_MARK } from "../../shared/instance-bundled";
 import { EventThemeProvider } from "../design";
 import { cx } from "../lib/cx";
+import { useInstanceConfig } from "../lib/config/useInstance";
 import { navigate } from "../lib/router";
 import { AmbientBackground, BrandPill, TabBar, type TabItem } from "../ui";
 import styles from "./AdminShell.module.css";
-import { CLASS_LABEL } from "./components/common";
 import { useAdminData } from "./data/AdminData";
 import { countByStatus } from "./data/payments";
 import { useNavigation } from "./navigation";
@@ -22,6 +21,7 @@ const FALLBACK: AdminRoute = { name: "resumen" };
 /** Signed-in frame: tone of the selected collection, navigation (top on desktop, bottom on phones), routed view. */
 export function AdminShell() {
   const { route } = useNavigation();
+  const { classMark, classShortName } = useInstanceConfig();
   const data = useAdminData();
   const current = route ?? FALLBACK;
   const mainRef = useRef<HTMLElement>(null);
@@ -87,7 +87,7 @@ export function AdminShell() {
         Saltar al contenido
       </a>
       <div className={styles.desktopBar}>
-        <BrandPill mark={CLASS_MARK} title="Tesorería" subtitle={CLASS_LABEL} href="#resumen" />
+        <BrandPill mark={classMark} title="Tesorería" subtitle={classShortName} href="#resumen" />
         <TabBar label="Secciones de tesorería" placement="top" items={items} activeKey={tabOf(current)} onSelect={onSelect} />
       </div>
       <main id="contenido" ref={mainRef} tabIndex={-1} className={cx(styles.main, detail ? styles.wide : styles.narrow)}>

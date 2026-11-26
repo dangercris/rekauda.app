@@ -5,7 +5,7 @@ import { longDate } from "../../lib/format";
 import { navigate } from "../../lib/router";
 import { Button, EmptyState, InlineConfirm, PageHeader, SectionHeader, useToast } from "../../ui";
 import { CollectionCard } from "../components/CollectionCard";
-import { EYEBROW, ErrorState, HeaderActions, ListSkeleton } from "../components/common";
+import { ErrorState, HeaderActions, ListSkeleton, useEyebrow } from "../components/common";
 import { useAdminData } from "../data/AdminData";
 import styles from "./EventsView.module.css";
 import { useLogout } from "./useLogout";
@@ -16,6 +16,7 @@ export function publicLink(slug: string): string {
 
 /** Collections management: every collection with its stats and actions. */
 export function EventsView() {
+  const eyebrow = useEyebrow();
   const { collections } = useAdminData();
   const onLogout = useLogout();
   const [showArchived, setShowArchived] = useState(false);
@@ -24,7 +25,7 @@ export function EventsView() {
 
   const header = (
     <PageHeader
-      eyebrow={EYEBROW}
+      eyebrow={eyebrow}
       title="Eventos"
       subtitle="Cada recaudación tiene su enlace, opciones y fecha límite."
       actions={<HeaderActions onRefresh={() => void collections.reload({ silent: true })} refreshing={collections.refreshing} onLogout={onLogout} />}

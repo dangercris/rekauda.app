@@ -5,7 +5,8 @@ import { navigate, setHash, useRoute } from "../../../lib/router";
 import { shareLink } from "../../../lib/share";
 import { Button, Chip, Hero, IconButton, TabBar, useToast } from "../../../ui";
 import { PageFrame } from "../../components/PageFrame";
-import { useBoard, useConfig } from "../../hooks/data";
+import { useInstanceConfig } from "../../../lib/config/useInstance";
+import { useBoard } from "../../hooks/data";
 import { scrollToTop, useDocumentTitle, useKeyboardOpen } from "../../hooks/ui";
 import { track } from "../../lib/analytics";
 import { readCodes } from "../../lib/codes";
@@ -28,7 +29,7 @@ export interface CollectionPageProps {
 export function CollectionPage({ collection, collectionsCount }: CollectionPageProps) {
   const route = useRoute();
   const toast = useToast();
-  const { banks } = useConfig();
+  const instance = useInstanceConfig();
   const open = collection.status === "abierta";
   const [codes, setCodes] = useState<string[]>(() => readCodes());
   const tab = resolveTab(route.hash, open, codes.length > 0);
@@ -38,13 +39,13 @@ export function CollectionPage({ collection, collectionsCount }: CollectionPageP
   const [lookupRequest, setLookupRequest] = useState<LookupRequest | null>(null);
   const deadline = useMemo(() => deadlineInfo(collection.deadline, open), [collection.deadline, open]);
 
-  useDocumentTitle(collectionTitle(collection.title));
+  useDocumentTitle(collectionTitle(collection.title, instance.classShortName));
 
   const onRegistered = useCallback(() => {
     setCodes(readCodes());
     reloadBoard();
   }, [reloadBoard]);
-  const flow = usePayFlow({ collection, banks, enabled: open, onRegistered });
+  const flow = usePayFlow({ collection, form: instance, enabled: open, onRegistered });
 
   // Keep the URL hash in sync with the tab actually shown (missing, unknown or #pagar on a closed one).
   useEffect(() => {

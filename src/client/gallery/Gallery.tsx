@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { PaymentStatus } from "../../shared/api";
 import { PAYMENT_STATUSES } from "../../shared/api";
-import { CLASS_MARK, CLASS_SHORT_NAME, TREASURY } from "../../shared/instance-bundled";
+import { useInstanceConfig } from "../lib/config/useInstance";
 import {
   EventThemeProvider,
   contrastRatio,
@@ -184,6 +184,7 @@ const SAMPLE_PAYMENTS: Array<{ name: string; parent: string; event: string; tone
 ];
 
 function Showcase() {
+  const { classMark, classShortName, treasury } = useInstanceConfig();
   const toast = useToast();
   const [status, setStatus] = useState<"todos" | "revision" | "pagados" | "observados">("revision");
   const [option, setOption] = useState<"mujer" | "hombre" | null>("mujer");
@@ -215,11 +216,11 @@ function Showcase() {
     <div className={styles.showcase}>
       <Block title="Identidad y encabezados">
         <Row wrap={false}>
-          <BrandPill mark={CLASS_MARK} title="Comité de Padres" subtitle={CLASS_SHORT_NAME} />
+          <BrandPill mark={classMark} title="Comité de Padres" subtitle={classShortName} />
           <IconButton icon="share" label="Compartir evento" />
         </Row>
         <PageHeader
-          eyebrow={`Tesorería · ${CLASS_SHORT_NAME}`}
+          eyebrow={`Tesorería · ${classShortName}`}
           title="Resumen"
           subtitle="Jueves 26 de noviembre"
           actions={
@@ -446,7 +447,7 @@ function Showcase() {
           </ListGroup>
           <Card variant="dashed" radius="lg" padding="sm">
             <div className={styles.cardHead}>
-              <img src={TREASURY.qrUrl ?? "/icon.svg"} alt="Código QR de Deuna de la tesorería" className={styles.qr} />
+              <img src={treasury.qrUrl ?? "/icon.svg"} alt="Código QR de Deuna de la tesorería" className={styles.qr} />
               <div>
                 <strong>¿Pagas desde otro teléfono?</strong>
                 <p className={styles.caption}>Escanea el QR de la tesorería desde la app Deuna.</p>

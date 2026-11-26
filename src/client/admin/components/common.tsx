@@ -1,11 +1,13 @@
 import type { CollectionStatus } from "../../../shared/api";
-import { CLASS_SHORT_NAME } from "../../../shared/instance-bundled";
+import { useInstanceConfig } from "../../lib/config/useInstance";
 import { cx } from "../../lib/cx";
 import { Button, EmptyState, Icon, IconButton, Skeleton, type IconName } from "../../ui";
 import styles from "./common.module.css";
 
-export const CLASS_LABEL = CLASS_SHORT_NAME;
-export const EYEBROW = `Tesorería · ${CLASS_LABEL}`;
+/** "Tesorería · <short class name>" for the screen headers of this tenant. */
+export function useEyebrow(): string {
+  return `Tesorería · ${useInstanceConfig().classShortName}`;
+}
 
 const COLLECTION_STATUS: Record<CollectionStatus, { label: string; icon: IconName; tone: "ok" | "void" | "warn" }> = {
   abierta: { label: "Abierta", icon: "dot", tone: "ok" },

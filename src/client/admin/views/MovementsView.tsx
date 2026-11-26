@@ -3,7 +3,7 @@ import type { AdminBankMovement, AdminPayment } from "../../../shared/api";
 import { errorMessage, ignoreMovement, importDeunaEml, linkMovement, listPayments } from "../../lib/api";
 import { compactDate, dateTime, plural } from "../../lib/format";
 import { Button, Card, EmptyState, InfoNote, Money, PageHeader, SectionHeader, SelectField, useToast, type SelectOption } from "../../ui";
-import { EYEBROW, ErrorState, HeaderActions, ListSkeleton } from "../components/common";
+import { ErrorState, HeaderActions, ListSkeleton, useEyebrow } from "../components/common";
 import { useAdminData } from "../data/AdminData";
 import { describeImport, type ImportOutcome } from "../data/importMessages";
 import { candidateLabel, candidatePayments } from "../data/movements";
@@ -15,6 +15,7 @@ type PaymentsState = { status: "loading" } | { status: "ready"; payments: AdminP
 
 /** AdminMovimientos: Deuna transfers that did not match a payment on their own. Link each one or ignore it. */
 export function MovementsView() {
+  const eyebrow = useEyebrow();
   const { movements, refreshAll } = useAdminData();
   const gate = useApiErrorGate();
   const onLogout = useLogout();
@@ -41,7 +42,7 @@ export function MovementsView() {
 
   const header = (
     <PageHeader
-      eyebrow={EYEBROW}
+      eyebrow={eyebrow}
       title="Movimientos"
       subtitle="Transferencias que llegaron a Deuna y aún no coinciden con un pago."
       actions={<HeaderActions onRefresh={() => void refresh()} refreshing={movements.refreshing} onLogout={onLogout} />}

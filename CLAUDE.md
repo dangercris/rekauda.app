@@ -33,7 +33,7 @@ pnpm run deploy            # remote migrations -> build -> wrangler deploy
 
 ## Per-instance configuration (critical)
 
-- All per-school values live in `rekauda.config.ts` (gitignored). Template: `rekauda.config.example.ts`. Types: `src/shared/instance-config.ts`; fail-fast validation: `src/shared/instance-validation.ts`; resolved values: `src/shared/instance.ts`.
+- All per-school values live in `rekauda.config.ts` (gitignored) in single mode and in `tenants.config_json` in multi mode. The Worker injects them into each page as `<script type="application/json" id="rekauda-config">` (plus title and description) and serves them at `GET /api/config`; the client reads them through `ConfigProvider` (`src/client/lib/config/`), never from module constants. Nothing in `src/client` may import `rekauda.config` (architecture test). Template: `rekauda.config.example.ts`. Types: `src/shared/instance-config.ts`; fail-fast validation: `src/shared/instance-validation.ts`; resolved values: `src/shared/instance.ts`.
 - Cloudflare settings live in `wrangler.jsonc` (gitignored). Template: `wrangler.example.jsonc`. `public/deuna-qr.png` and `redirect/wrangler.jsonc` are local only too.
 - `scripts/ensure-config.mjs` runs before dev/build/test/typecheck/deploy/migrate and copies the examples when files are missing.
 - Vitest aliases `rekauda.config` to the EXAMPLE, so tests are deterministic and never depend on a real instance. Tests and fixtures must use example values.
@@ -51,7 +51,7 @@ pnpm run deploy            # remote migrations -> build -> wrangler deploy
 6. **Migrations** are new numbered files in `migrations/`. Never edit an applied migration's behavior. D1 SQL comments must not contain `;` or unbalanced quotes.
 7. **Security headers.** The CSP exists in both `public/_headers` and `src/worker/og.ts`; keep them identical (a test checks this). The admin keeps a strict CSP without analytics hosts. Never loosen CSP beyond what a feature strictly needs.
 8. **Logs** are one structured JSON line with a `message`; never include emails, family names, secrets or the FORWARD_TO address.
-9. **Analytics** loads only after consent (footer "Preferencias de cookies"); never in the admin. `analytics.gaMeasurementId: null` disables it.
+9. **Analytics** loads only after consent (footer "Preferencias de cookies"); never in the admin. The GA id comes from the tenant config (`analytics.gaMeasurementId`); `null` disables it.
 10. **Commits**: conventional commits (`feat:`, `fix(ui):`, `docs:`...), small reviewable units, no AI co-author or attribution lines. Do not commit or push unless the user asks.
 
 ## Deuna email pipeline (high risk area)
