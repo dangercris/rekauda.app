@@ -115,6 +115,12 @@ El Worker responde en `http://localhost:8799` y Vite en su puerto por defecto, c
 | `pnpm run deploy` | 🚢 Aplica migraciones remotas, compila y despliega (no uses `pnpm deploy`) |
 | `pnpm types` | 🧬 Regenera `worker-configuration.d.ts` desde `wrangler.jsonc` |
 
+## ☁️ Rekauda Cloud (en construcción)
+
+La rama `feat/cloud` prepara una versión multi-curso: un solo Worker, un subdominio por curso y enlaces mágicos para entrar. 🚧 Por ahora corre solo en local y no se publica en ningún lado hasta pasar la [lista de verificación en sandbox](docs/CLOUD-SANDBOX-CHECKLIST.md).
+
+En esta rama los comandos `dev:api`, `db:migrate:local`, `db:migrate:remote`, `types` y `deploy` se niegan a correr (son del piloto, en `main`). Para autoalojar o probar usa los equivalentes `pnpm cloud:migrate:local`, `pnpm cloud:seed:local`, `pnpm cloud:dev` y `pnpm cloud:types`, con `TENANCY` en `single` en `wrangler.cloud.jsonc` para un solo curso. Detalles en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md#rekauda-cloud-multi-curso).
+
 ## 📚 Documentación
 
 | Documento | Para quién | Contenido |
@@ -122,6 +128,7 @@ El Worker responde en `http://localhost:8799` y Vite en su puerto por defecto, c
 | ☁️ [docs/DESPLIEGUE-CLOUDFLARE.md](docs/DESPLIEGUE-CLOUDFLARE.md) | Quien instala | Instalación desde cero, secretos, dominio y la guía "Personaliza tu instancia" |
 | 📬 [docs/CORREO-DEUNA.md](docs/CORREO-DEUNA.md) | Quien instala y tesorería | Confirmación automática por correo de Deuna |
 | 🧮 [docs/OPERACION.md](docs/OPERACION.md) | Tesorería | Uso diario, revisión, cierre y borrado de datos |
+| ☁️ [docs/CLOUD-SANDBOX-CHECKLIST.md](docs/CLOUD-SANDBOX-CHECKLIST.md) | Quien publique Cloud | Verificaciones en un dominio de pruebas antes de salir a producción |
 | 🏗️ [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Desarrolladores | Componentes, rutas, correo, analíticas y modelo de amenazas |
 | 🤝 [CONTRIBUTING.md](CONTRIBUTING.md) | Contribuyentes | Pruebas, convenciones y cómo proponer cambios |
 | 🎨 [DESIGN.md](DESIGN.md) y [PRODUCT.md](PRODUCT.md) | Diseño y producto | Sistema de diseño y propósito del producto |

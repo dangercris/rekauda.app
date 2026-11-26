@@ -338,6 +338,13 @@ Cloudflare cambia sus planes y precios. No copiamos cifras aquí: consulta las p
 
 Prueba la ruta `/api/og/<enlace>.jpg` después de desplegar. Si falla por límites de CPU, la vista previa no aparece pero el resto de la aplicación sigue funcionando.
 
+## Rekauda Cloud (multi-curso)
+
+La rama `feat/cloud` usa `wrangler.cloud.jsonc` (copiado de `wrangler.cloud.example.jsonc`) y `migrations-cloud/`. Con `TENANCY = "multi"` resuelve cada curso por subdominio; con `TENANCY = "single"` funciona como una instalación de un solo curso, con `ADMIN_PASSWORD` y `FORWARD_TO`.
+
+- En esta fase todo es local: `pnpm cloud:guard`, `pnpm cloud:migrate:local`, `pnpm cloud:seed:local` y `pnpm cloud:dev`. La guarda rechaza `--remote` y cualquier recurso compartido con otra instalación, y `deploy` y `db:migrate:remote` se niegan en esta rama.
+- Cloud necesita una ruta comodín `*.<dominio>/*` con DNS `*` con proxy, un dominio remitente para `send_email`, un bucket `MAIL_ARCHIVE` con regla de 30 días y una regla catch-all de Email Routing en el subdominio de entrada (`INBOUND_DOMAIN`). Nada de eso está verificado: sigue la [lista de verificación en sandbox](CLOUD-SANDBOX-CHECKLIST.md) en un dominio aparte, nunca en el de una instalación en uso.
+
 ## Siguiente paso
 
 [CORREO-DEUNA.md](CORREO-DEUNA.md) para la confirmación automática, y [OPERACION.md](OPERACION.md) para el uso diario.
