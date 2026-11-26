@@ -13,6 +13,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  document.title = "";
   vi.unstubAllGlobals();
   setLocation("/");
 });
@@ -27,7 +28,7 @@ describe("routing", () => {
     expect(await heading("Vestuario del musical")).toBeInTheDocument();
     expect(window.location.pathname).toBe("/");
     await waitFor(() => expect(window.location.hash).toBe("#pagar"));
-    expect(document.title).toBe("Vestuario del musical · 1.º Básica A");
+    await waitFor(() => expect(document.title).toBe("Vestuario del musical · 1.º Básica A"));
     // 2 public collections: the back link to the full list is shown.
     expect(screen.getAllByRole("link", { name: /Todas las recaudaciones/ })[0]).toHaveAttribute("href", "/?todas");
   });
@@ -37,7 +38,7 @@ describe("routing", () => {
     setLocation("/?todas");
     render(<App />);
     expect(await heading("Recaudaciones del curso")).toBeInTheDocument();
-    expect(document.title).toBe("Recaudaciones 1.º Básica A");
+    await waitFor(() => expect(document.title).toBe("Recaudaciones 1.º Básica A"));
     const openList = screen.getByRole("list", { name: "Recaudaciones abiertas" });
     expect(within(openList).getAllByRole("link")).toHaveLength(2);
     expect(screen.getByRole("heading", { name: "Anteriores" })).toBeInTheDocument();

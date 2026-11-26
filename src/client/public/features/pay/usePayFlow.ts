@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, type Dispatch, type RefObject } from "react";
 import type { CollectionDetail } from "../../../../shared/api";
+import type { Instance } from "../../../../shared/instance";
 import { createPayment, errorMessage, isApiRequestError } from "../../../lib/publicApi";
 import { todayEc } from "../../../lib/format";
 import { ImageProcessingError, MAX_UPLOAD_BYTES, prepareReceipt } from "../../../lib/image";
@@ -37,15 +38,19 @@ const TOO_BIG = "El comprobante supera los 5 MB. Sube una captura de pantalla en
 
 const FOCUSABLE = 'input:not([type="hidden"]), select, textarea, button';
 
+/** What payment validation needs from the tenant config. */
+export type PayFormConfig = Pick<Instance, "banks" | "earliestTransferDate" | "earliestTransferLabel">;
+
 export interface UsePayFlowOptions {
   collection: CollectionDetail;
-  banks: readonly string[] | null;
+  /** The tenant values the form validates against. */
+  form: PayFormConfig;
   /** Payments can only be registered while the collection is open (no drafts otherwise). */
   enabled: boolean;
   onRegistered?: ((code: string) => void) | undefined;
 }
 
-export function usePayFlow({ collection, banks, enabled, onRegistered }: UsePayFlowOptions): PayFlow {
+export function usePayFlow({ collection, form, enabled, onRegistered }: UsePayFlowOptions): PayFlow {
   const { slug, options, maxPerPayment } = collection;
   const [state, dispatch] = useReducer(payReducer, undefined, () =>
     initPayState({ options, maxPerPayment, today: todayEc(), draft: enabled ? loadDraft(slug) : null }),
@@ -108,7 +113,12 @@ export function usePayFlow({ collection, banks, enabled, onRegistered }: UsePayF
     if (state.submitting) return;
     if (state.receipt?.status === "processing") return;
     const values = toPaymentValues(state, amount.value);
-    const issues = validatePayment(values, { optionKeys: options.map((o) => o.key), banks });
+    const issues = validatePayment(values, {
+      optionKeys: options.map((o) => o.key),
+      banks: form.banks,
+      earliestTransferDate: form.earliestTransferDate,
+      earliestTransferLabel: form.earliestTransferLabel,
+    });
     const first = issues[0];
     if (first) {
       dispatch({ type: "invalid", issues, summary: summarize(issues) });
@@ -152,7 +162,7 @@ export function usePayFlow({ collection, banks, enabled, onRegistered }: UsePayF
       track("payment_failed", { collection: slug, error_code: isApiRequestError(error) ? error.code : "unknown" });
       dispatch({ type: "submitFailure", message: errorMessage(error) });
     }
-  }, [state, amount, options, banks, slug, focusField]);
+  }, [state, amount, options, form, slug, focusField]);
 
   const restart = useCallback(() => dispatch({ type: "goTo", step: 1 }), []);
 

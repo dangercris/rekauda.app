@@ -1,7 +1,7 @@
 /**
  * Resolution of per-school values. Pure: nothing is read or validated when this module loads, so the Worker can
- * resolve a different config for every tenant. The bundled `rekauda.config.ts` is read elsewhere (the single-mode
- * ConfigStore on the server, `instance-bundled.ts` for the client until it gets a ConfigProvider).
+ * resolve a different config for every tenant. The bundled `rekauda.config.ts` is read only by the single-mode
+ * ConfigStore on the server: the client gets its config from the boot JSON or /api/config.
  */
 import type { InstanceConfig } from "./instance-config";
 import { monthYearEs, validateInstanceConfig } from "./instance-validation";

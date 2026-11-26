@@ -1,4 +1,5 @@
 import type { AdminBankMovement, AdminCollection, AdminPayment } from "../../../shared/api";
+import { tenantA } from "../../test/tenants";
 
 export function makeCollection(overrides: Partial<AdminCollection> = {}): AdminCollection {
   return {
@@ -91,8 +92,10 @@ export interface Call {
 type Handler = (call: Call) => Response | Promise<Response>;
 
 /** Routes fetch calls to handlers by "METHOD path" (path without the query string); records every call. */
-export function mockApi(routes: Record<string, Handler>): { fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>; calls: Call[] } {
+export function mockApi(overrides: Record<string, Handler>): { fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>; calls: Call[] } {
   const calls: Call[] = [];
+  // Every admin screen sits under the ConfigProvider, which asks for the tenant config when the page has no boot JSON.
+  const routes: Record<string, Handler> = { "GET /api/config": () => json(200, tenantA), ...overrides };
   const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const method = init?.method ?? "GET";

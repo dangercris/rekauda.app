@@ -1,12 +1,14 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderWithConfig } from "../../../test/renderWithConfig";
+import { tenantA } from "../../../test/tenants";
 import { ConsentBanner } from "../../components/ConsentBanner";
 import { CONSENT_KEY, CONSENT_VERSION, getConsentState, openPreferences, readConsent, resetConsentForTests, setConsent } from "./consent";
 import { EVENT_PARAM_KEYS, track, type AnalyticsEventName } from "./events";
 import { resetGtagForTests, sendPageView } from "./gtag";
 
-vi.mock("./config", () => ({ GA_MEASUREMENT_ID: "G-TEST1234" }));
+const GA = tenantA.analytics.gaMeasurementId;
 
 const scripts = () => document.querySelectorAll('script[src^="https://www.googletagmanager.com/gtag/js"]');
 const calls = (): unknown[][] => (window.dataLayer ?? []).map((entry) => Array.from(entry as ArrayLike<unknown>));
@@ -23,7 +25,7 @@ afterEach(() => {
   scripts().forEach((s) => s.remove());
   delete window.dataLayer;
   delete window.gtag;
-  Reflect.deleteProperty(window, "ga-disable-G-TEST1234");
+  Reflect.deleteProperty(window, "ga-disable-G-ALFA1234");
 });
 
 describe("consent storage", () => {
@@ -32,7 +34,7 @@ describe("consent storage", () => {
   });
 
   it("stores the choice with the policy version", () => {
-    setConsent("denied");
+    setConsent("denied", GA);
     expect(JSON.parse(localStorage.getItem(CONSENT_KEY) ?? "null")).toEqual({ choice: "denied", version: CONSENT_VERSION });
     expect(readConsent()).toBe("denied");
   });
@@ -57,7 +59,7 @@ describe("consent storage", () => {
       throw new Error("quota");
     });
     expect(readConsent()).toBeNull();
-    expect(() => setConsent("denied")).not.toThrow();
+    expect(() => setConsent("denied", GA)).not.toThrow();
     expect(getConsentState().choice).toBe("denied");
   });
 });
@@ -66,24 +68,24 @@ describe("track facade", () => {
   it("is a no-op before consent and after denial", () => {
     track("share_click", { collection: "musical" });
     expect(window.dataLayer).toBeUndefined();
-    setConsent("denied");
+    setConsent("denied", GA);
     track("share_click", { collection: "musical" });
     expect(events("share_click")).toHaveLength(0);
     expect(scripts()).toHaveLength(0);
   });
 
   it("sends events once granted and stops after the visitor switches to denied", () => {
-    setConsent("granted");
+    setConsent("granted", GA);
     track("share_click", { collection: "musical" });
     expect(events("share_click")).toHaveLength(1);
-    setConsent("denied");
+    setConsent("denied", GA);
     track("share_click", { collection: "musical" });
     expect(events("share_click")).toHaveLength(1);
-    expect(Reflect.get(window, "ga-disable-G-TEST1234")).toBe(true);
+    expect(Reflect.get(window, "ga-disable-G-ALFA1234")).toBe(true);
   });
 
   it("uses Consent Mode v2 defaults with only analytics storage granted and no automatic page_view", () => {
-    setConsent("granted");
+    setConsent("granted", GA);
     const all = calls();
     expect(all[0]).toEqual([
       "consent",
@@ -91,18 +93,27 @@ describe("track facade", () => {
       { analytics_storage: "denied", ad_storage: "denied", ad_user_data: "denied", ad_personalization: "denied" },
     ]);
     expect(all[1]).toEqual(["consent", "update", { analytics_storage: "granted" }]);
-    expect(all.find((c) => c[0] === "config")).toEqual(["config", "G-TEST1234", { send_page_view: false }]);
+    expect(all.find((c) => c[0] === "config")).toEqual(["config", "G-ALFA1234", { send_page_view: false }]);
+  });
+
+  it("configures and loads gtag with the id it is given, not a fixed one", () => {
+    setConsent("granted", "G-OTRO5678");
+    expect(calls().find((c) => c[0] === "config")?.[1]).toBe("G-OTRO5678");
+    expect(scripts()[0]?.getAttribute("src")).toBe("https://www.googletagmanager.com/gtag/js?id=G-OTRO5678");
+    setConsent("denied", "G-OTRO5678");
+    expect(Reflect.get(window, "ga-disable-G-OTRO5678")).toBe(true);
+    Reflect.deleteProperty(window, "ga-disable-G-OTRO5678");
   });
 
   it("sends page_view with the hash tab path and the document title", () => {
     document.title = "Vestuario";
-    setConsent("granted");
+    setConsent("granted", GA);
     sendPageView("/r/musical#pagar", document.title);
     expect(events("page_view")[0]?.[2]).toMatchObject({ page_path: "/r/musical#pagar", page_title: "Vestuario" });
   });
 
   it("only forwards allowlisted keys (no PII can leak through extra params)", () => {
-    setConsent("granted");
+    setConsent("granted", GA);
     const leaky = { collection: "musical", students: 2, parentName: "Ana Pérez", phone: "0991234567", code: "ABC-234", amount: 1400 };
     track("payment_submitted", leaky);
     expect(Object.keys(events("payment_submitted")[0]?.[2] as object).sort()).toEqual(["collection", "students"]);
@@ -120,13 +131,13 @@ describe("track facade", () => {
 
 describe("consent banner", () => {
   it("never appears on its own, even on a first visit with no choice", () => {
-    render(<ConsentBanner />);
+    renderWithConfig(<ConsentBanner />);
     expect(screen.queryByRole("region", { name: "Preferencias de cookies" })).toBeNull();
     expect(scripts()).toHaveLength(0);
   });
 
   it("opens from preferences and offers both buttons", () => {
-    render(<ConsentBanner />);
+    renderWithConfig(<ConsentBanner />);
     act(() => openPreferences());
     expect(screen.getByRole("region", { name: "Preferencias de cookies" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "¿Nos ayudas a mejorar el sitio?" })).toBeInTheDocument();
@@ -138,18 +149,18 @@ describe("consent banner", () => {
   it("stays hidden when a choice is stored", () => {
     localStorage.setItem(CONSENT_KEY, JSON.stringify({ choice: "denied", version: CONSENT_VERSION }));
     resetConsentForTests();
-    render(<ConsentBanner />);
+    renderWithConfig(<ConsentBanner />);
     expect(screen.queryByRole("region", { name: "Preferencias de cookies" })).toBeNull();
   });
 
   it("loads the gtag script exactly once on accept, even after reopening and accepting again", async () => {
     const user = userEvent.setup();
-    render(<ConsentBanner />);
+    renderWithConfig(<ConsentBanner />);
     act(() => openPreferences());
     expect(scripts()).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Aceptar" }));
     expect(scripts()).toHaveLength(1);
-    expect(scripts()[0]?.getAttribute("src")).toBe("https://www.googletagmanager.com/gtag/js?id=G-TEST1234");
+    expect(scripts()[0]?.getAttribute("src")).toBe("https://www.googletagmanager.com/gtag/js?id=G-ALFA1234");
     expect(screen.queryByRole("region", { name: "Preferencias de cookies" })).toBeNull();
     act(() => openPreferences());
     await user.click(screen.getByRole("button", { name: "Aceptar" }));
@@ -158,7 +169,7 @@ describe("consent banner", () => {
 
   it("never loads the script on deny and closes", async () => {
     const user = userEvent.setup();
-    render(<ConsentBanner />);
+    renderWithConfig(<ConsentBanner />);
     act(() => openPreferences());
     await user.click(screen.getByRole("button", { name: "No, gracias" }));
     expect(scripts()).toHaveLength(0);
@@ -167,8 +178,8 @@ describe("consent banner", () => {
   });
 
   it("reopens from preferences even with a stored choice", () => {
-    setConsent("denied");
-    render(<ConsentBanner />);
+    setConsent("denied", GA);
+    renderWithConfig(<ConsentBanner />);
     expect(screen.queryByRole("region", { name: "Preferencias de cookies" })).toBeNull();
     act(() => openPreferences());
     expect(screen.getByRole("region", { name: "Preferencias de cookies" })).toBeInTheDocument();

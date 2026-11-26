@@ -1,6 +1,7 @@
 import { cx } from "../../lib/cx";
 import { Button } from "../../ui";
-import { isAnalyticsEnabled, setConsent, useConsent } from "../lib/analytics";
+import { useInstanceConfig } from "../../lib/config/useInstance";
+import { setConsent, useAnalyticsEnabled, useConsent } from "../lib/analytics";
 import styles from "./ConsentBanner.module.css";
 
 /**
@@ -11,7 +12,9 @@ import styles from "./ConsentBanner.module.css";
  */
 export function ConsentBanner() {
   const { preferencesOpen } = useConsent();
-  if (!isAnalyticsEnabled() || !preferencesOpen) return null;
+  const { gaMeasurementId } = useInstanceConfig().analytics;
+  const enabled = useAnalyticsEnabled();
+  if (!enabled || !preferencesOpen) return null;
   return (
     <div className={styles.wrap}>
       <section role="region" aria-label="Preferencias de cookies" className={cx("m-glass", styles.card)}>
@@ -23,10 +26,10 @@ export function ConsentBanner() {
           publicidad.
         </p>
         <div className={styles.actions}>
-          <Button size="sm" variant="ink" onClick={() => setConsent("granted")}>
+          <Button size="sm" variant="ink" onClick={() => setConsent("granted", gaMeasurementId)}>
             Aceptar
           </Button>
-          <Button size="sm" variant="soft" onClick={() => setConsent("denied")}>
+          <Button size="sm" variant="soft" onClick={() => setConsent("denied", gaMeasurementId)}>
             No, gracias
           </Button>
         </div>

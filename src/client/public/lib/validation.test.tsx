@@ -24,7 +24,14 @@ const valid: PaymentValues = {
   consent: true,
 };
 
-const ctx = { optionKeys: ["mujer", "hombre"], banks: ["Produbanco"], now: NOW };
+const EARLIEST = "2026-11-01";
+const ctx = {
+  optionKeys: ["mujer", "hombre"],
+  banks: ["Produbanco"],
+  earliestTransferDate: EARLIEST,
+  earliestTransferLabel: "noviembre de 2026",
+  now: NOW,
+};
 
 describe("validation mirrors the server", () => {
   it("person names: letters, marks, spaces . ' - ; 2..60; curly apostrophes normalized", () => {
@@ -45,13 +52,18 @@ describe("validation mirrors the server", () => {
     for (const bad of ["072345678", "09912345", "abc", "+593", ""]) expect(isValidPhone(bad)).toBe(false);
   });
 
-  it("transfer date: required, not future (Ecuador calendar), not before Nov 2026", () => {
-    expect(transferDateProblem("2026-11-26", NOW)).toBeNull();
-    expect(transferDateProblem("2026-11-27", NOW)).toBe("future");
-    expect(transferDateProblem("2026-10-31", NOW)).toBe("too_old");
-    expect(transferDateProblem("", NOW)).toBe("missing");
+  it("transfer date: required, not future (Ecuador calendar), not before the earliest date", () => {
+    expect(transferDateProblem("2026-11-26", EARLIEST, NOW)).toBeNull();
+    expect(transferDateProblem("2026-11-27", EARLIEST, NOW)).toBe("future");
+    expect(transferDateProblem("2026-10-31", EARLIEST, NOW)).toBe("too_old");
+    expect(transferDateProblem("", EARLIEST, NOW)).toBe("missing");
     // 23:30 Ecuador on the 26th is already the 27th in UTC: the 26th is still "today".
-    expect(transferDateProblem("2026-11-26", new Date("2026-11-27T04:30:00Z"))).toBeNull();
+    expect(transferDateProblem("2026-11-26", EARLIEST, new Date("2026-11-27T04:30:00Z"))).toBeNull();
+  });
+
+  it("transfer date: the earliest date comes from the argument, not from a fixed value", () => {
+    expect(transferDateProblem("2026-11-26", "2026-12-15", NOW)).toBe("too_old");
+    expect(transferDateProblem("2026-11-26", "2026-01-01", NOW)).toBeNull();
   });
 
   it("amounts: 14,00 / $14 / USD 14.00, between $1 and $6.000", () => {
@@ -112,8 +124,17 @@ describe("validation mirrors the server", () => {
     expect(issues).toEqual([expect.objectContaining({ field: "students.1.givenNames" })]);
   });
 
-  it("only checks the bank against the list once it is known", () => {
+  it("checks the bank against the tenant's list", () => {
     expect(validatePayment({ ...valid, bank: "Banco X" }, ctx).map((i) => i.field)).toEqual(["bank"]);
-    expect(validatePayment({ ...valid, bank: "Banco X" }, { ...ctx, banks: null })).toEqual([]);
+    expect(validatePayment({ ...valid, bank: "Banco X" }, { ...ctx, banks: ["Banco X"] })).toEqual([]);
+  });
+
+  it("names the tenant's earliest month in the too-old message", () => {
+    const old = { ...valid, transferDate: "2026-11-20" };
+    const issue = (c: typeof ctx) => validatePayment(old, c).find((i) => i.field === "transferDate")?.message;
+    expect(issue(ctx)).toBeUndefined();
+    expect(issue({ ...ctx, earliestTransferDate: "2027-03-01", earliestTransferLabel: "marzo de 2027", now: new Date("2027-04-01T17:00:00Z") })).toBe(
+      "La fecha no puede ser anterior a marzo de 2027.",
+    );
   });
 });

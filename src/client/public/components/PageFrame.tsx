@@ -2,9 +2,8 @@ import type { ReactNode } from "react";
 import { EventThemeProvider } from "../../design";
 import { cx } from "../../lib/cx";
 import { AmbientBackground, BrandPill } from "../../ui";
-import { useConfig } from "../hooks/data";
-import { isAnalyticsEnabled, openPreferences } from "../lib/analytics";
-import { CLASS_MARK } from "../../../shared/instance-bundled";
+import { useInstanceConfig } from "../../lib/config/useInstance";
+import { openPreferences, useAnalyticsEnabled } from "../lib/analytics";
 import { footerText } from "../lib/identity";
 import styles from "./PageFrame.module.css";
 
@@ -24,14 +23,15 @@ export interface PageFrameProps {
 
 /** Page root: event theme, ambient light, brand header, content and the class footer. */
 export function PageFrame({ tone, coverUrl, wide, headerEnd, headerCenter, after, className, children }: PageFrameProps) {
-  const { className: classLabel, schoolName } = useConfig();
+  const { className: classLabel, schoolName, classMark } = useInstanceConfig();
+  const analyticsEnabled = useAnalyticsEnabled();
   return (
     <EventThemeProvider tone={tone ?? null} coverUrl={coverUrl ?? null} as="div" className={cx(styles.root, className)}>
       <AmbientBackground />
       <div className={cx(styles.frame, wide && styles.wide)}>
         <header className={styles.header}>
           <BrandPill
-            mark={CLASS_MARK}
+            mark={classMark}
             title={classLabel}
             subtitle="Recaudaciones de padres de familia"
             href="/"
@@ -55,7 +55,7 @@ export function PageFrame({ tone, coverUrl, wide, headerEnd, headerCenter, after
               Christian Segovia
             </a>
           </p>
-          {isAnalyticsEnabled() && (
+          {analyticsEnabled && (
             <p className={styles.credit}>
               <button type="button" className={styles.prefs} onClick={openPreferences}>
                 Preferencias de cookies

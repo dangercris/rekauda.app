@@ -1,9 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { CollectionDetail } from "../../../../shared/api";
 import { cx } from "../../../lib/cx";
-import { TREASURY } from "../../../../shared/instance-bundled";
 import { Stepper } from "../../../ui";
-import { useConfig } from "../../hooks/data";
+import { useInstanceConfig } from "../../../lib/config/useInstance";
 import { scrollToTop } from "../../hooks/ui";
 import { track } from "../../lib/analytics";
 import { StepDone } from "./StepDone";
@@ -24,7 +23,7 @@ const STEPS = ["Transfiere", "Registra", "Listo"] as const;
 
 /** Guided payment: transfer, register, done. Each step change scrolls up and focuses the step title. */
 export function PayPanel({ collection, flow, active, onViewStatus, actionBarClassName }: PayPanelProps) {
-  const { config, banks } = useConfig();
+  const { treasury, banks } = useInstanceConfig();
   const { state, dispatch } = flow;
   const panelRef = useRef<HTMLDivElement>(null);
   const lastStep = useRef(state.step);
@@ -57,7 +56,7 @@ export function PayPanel({ collection, flow, active, onViewStatus, actionBarClas
             collection={collection}
             count={state.count}
             onCount={(count) => dispatch({ type: "setCount", count })}
-            treasury={config?.treasury ?? TREASURY}
+            treasury={treasury}
             onNext={() => dispatch({ type: "goTo", step: 2 })}
             actionBarClassName={actionBarClassName}
           />
@@ -67,7 +66,7 @@ export function PayPanel({ collection, flow, active, onViewStatus, actionBarClas
             collection={collection}
             flow={flow}
             banks={banks}
-            treasury={config?.treasury ?? TREASURY}
+            treasury={treasury}
             onBack={() => dispatch({ type: "goTo", step: 1 })}
             actionBarClassName={actionBarClassName}
           />

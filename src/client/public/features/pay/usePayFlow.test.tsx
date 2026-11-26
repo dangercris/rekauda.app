@@ -28,7 +28,7 @@ describe("usePayFlow submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { result, unmount } = renderHook(() =>
-      usePayFlow({ collection: musical, banks: ["Produbanco"], enabled: true }),
+      usePayFlow({ collection: musical, form: { banks: ["Produbanco"], earliestTransferDate: "2000-01-01", earliestTransferLabel: "enero de 2000" }, enabled: true }),
     );
     const id = result.current.state.students[0]?.id ?? 1;
     act(() => {

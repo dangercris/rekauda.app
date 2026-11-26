@@ -2,6 +2,7 @@ import type { CollectionSummary } from "../../../../shared/api";
 import { ToneScope } from "../../../design";
 import { cx } from "../../../lib/cx";
 import { EmptyState, Icon, Link, ProgressBar, SectionHeader } from "../../../ui";
+import { useInstanceConfig } from "../../../lib/config/useInstance";
 import { PageFrame } from "../../components/PageFrame";
 import { useDocumentTitle } from "../../hooks/ui";
 import { deadlineInfo } from "../../lib/deadline";
@@ -10,7 +11,7 @@ import { priceSummary } from "../../lib/pricing";
 import styles from "./HomePage.module.css";
 
 export function HomePage({ collections }: { collections: readonly CollectionSummary[] }) {
-  useDocumentTitle(homeTitle());
+  useDocumentTitle(homeTitle(useInstanceConfig().classShortName));
   const open = collections.filter((c) => c.status === "abierta");
   const closed = collections.filter((c) => c.status === "cerrada");
   return (

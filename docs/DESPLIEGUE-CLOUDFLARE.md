@@ -116,7 +116,7 @@ Si el archivo tiene datos inválidos, el proyecto falla al cargar con un mensaje
 | `defaultTone` | Color `#RRGGBB` propuesto al crear recaudaciones | Formato `#RRGGBB` |
 | `analytics.gaMeasurementId` | ID de medición de Google Analytics 4 (por ejemplo `"G-ABC123XYZ9"`) o `null` | `null` apaga las analíticas por completo: sin aviso de cookies y sin cargar nada |
 
-Los datos de `treasury` son públicos a propósito: las familias los necesitan para pagar. Con esta configuración también se generan los títulos de las páginas (`index.html` y `admin.html` usan marcadores `%REKAUDA_*%` que Vite reemplaza al compilar).
+Los datos de `treasury` son públicos a propósito: las familias los necesitan para pagar. Con esta configuración también se generan los títulos de las páginas: el Worker los escribe al servir cada página y deja los datos en una etiqueta `#rekauda-config`, de donde los lee la aplicación (si falta, los pide a `/api/config`). Ya no se incrustan al compilar.
 
 Las pruebas usan siempre la configuración de ejemplo (por un alias de Vitest), así que cambiar tu configuración real no las rompe.
 

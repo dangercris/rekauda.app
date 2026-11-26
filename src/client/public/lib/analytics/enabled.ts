@@ -1,8 +1,6 @@
-import { GA_MEASUREMENT_ID } from "./config";
-
 const PLACEHOLDER_ID = "G-XXXXXXXXXX";
 
-/** True only when a real Measurement ID is configured. */
-export function isAnalyticsEnabled(): boolean {
-  return GA_MEASUREMENT_ID !== PLACEHOLDER_ID && /^G-[A-Z0-9]{4,}$/.test(GA_MEASUREMENT_ID);
+/** True only for a real Measurement ID from the tenant config. null, the placeholder and malformed ids all mean "off". */
+export function isAnalyticsEnabled(measurementId: string | null): measurementId is string {
+  return measurementId !== null && measurementId !== PLACEHOLDER_ID && /^G-[A-Z0-9]{4,20}$/.test(measurementId);
 }

@@ -5,7 +5,7 @@ import { navigate } from "../../lib/router";
 import { isString, readJson, writeJson } from "../../lib/storage";
 import { Button, EmptyState, Icon, ListGroup, PageHeader, SectionHeader, TextField, useToast } from "../../ui";
 import { CollectionSwitcher } from "../components/CollectionSwitcher";
-import { EYEBROW, ErrorState, HeaderActions, ListSkeleton } from "../components/common";
+import { ErrorState, HeaderActions, ListSkeleton, useEyebrow } from "../components/common";
 import { PaymentRow } from "../components/PaymentRow";
 import { FILTER_LABEL, StatusFilter } from "../components/StatusFilter";
 import { useAdminData } from "../data/AdminData";
@@ -26,6 +26,7 @@ function resultText(count: number, status: StatusFilterValue, query: string): st
 
 /** AdminPagos: payments of the selected collection, filtered by status (hash) and searched by text. */
 export function PaymentsView({ status }: { status: StatusFilterValue }) {
+  const eyebrow = useEyebrow();
   const { collections, pickable, selected, select, payments, refreshAll } = useAdminData();
   const onLogout = useLogout();
   const toast = useToast();
@@ -47,7 +48,7 @@ export function PaymentsView({ status }: { status: StatusFilterValue }) {
 
   const header = (
     <PageHeader
-      eyebrow={EYEBROW}
+      eyebrow={eyebrow}
       title="Pagos"
       actions={<HeaderActions onRefresh={() => void refreshAll()} refreshing={collections.refreshing || payments.refreshing} onLogout={onLogout} />}
     />

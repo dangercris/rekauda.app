@@ -1,3 +1,4 @@
+import { ConfigProvider } from "../lib/config/ConfigProvider";
 import { matchPath, useRoute } from "../lib/router";
 import { ToastProvider } from "../ui";
 import { LoadingPage } from "./components/LoadingPage";
@@ -5,7 +6,7 @@ import { NetworkErrorPage, NotFoundPage } from "./components/StateMessage";
 import { Analytics } from "./components/Analytics";
 import { CollectionPage } from "./features/collection/CollectionPage";
 import { HomePage } from "./features/home/HomePage";
-import { ConfigProvider, useCollection, useCollections } from "./hooks/data";
+import { useCollection, useCollections } from "./hooks/data";
 
 /** Slugs as the worker accepts them (also guards the old `/r/...` links). */
 export const SLUG_RE = /^[a-z0-9-]{3,48}$/;

@@ -2,7 +2,6 @@ import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
-import { CLASS_NAME, CLASS_SHORT_NAME } from "./src/shared/instance-bundled";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const entry = (file: string): string => fileURLToPath(new URL(file, import.meta.url));
@@ -31,33 +30,9 @@ function mpaDevRewrites(): Plugin {
   };
 }
 
-const escapeHtml = (value: string): string =>
-  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
 /**
- * Fills the %REKAUDA_*% placeholders of the HTML entry points (title and description) from rekauda.config.ts,
- * at build and dev time. Plain text substitution: no inline scripts, so the CSP is untouched.
- * Runs before Vite's own %ENV% replacement so the names never collide with env variables.
- */
-function instanceHtml(): Plugin {
-  const values: Record<string, string> = {
-    REKAUDA_HOME_TITLE: `Recaudaciones ${CLASS_SHORT_NAME}`,
-    REKAUDA_HOME_DESCRIPTION: `Pagos y comprobantes de las recaudaciones de ${CLASS_NAME}.`,
-    REKAUDA_ADMIN_TITLE: `Tesorería ${CLASS_SHORT_NAME}`,
-    REKAUDA_ADMIN_DESCRIPTION: `Panel de tesorería de las recaudaciones de ${CLASS_NAME}.`,
-  };
-  return {
-    name: "rekauda-instance-html",
-    transformIndexHtml: {
-      order: "pre",
-      handler: (html) => html.replace(/%(REKAUDA_[A-Z_]+)%/g, (match, key: string) => (key in values ? escapeHtml(values[key] ?? "") : match)),
-    },
-  };
-}
-
-/**
- * Vitest never reads the local rekauda.config.ts: every import of it resolves to the committed example,
- * so tests are deterministic on any machine.
+ * Vitest never reads the local copy of the config: every import of it (the single-mode ConfigStore in the Worker)
+ * resolves to the committed example, so tests are deterministic on any machine.
  */
 const testAlias = [{ find: /^(\.{1,2}\/)+rekauda\.config$/, replacement: entry("./rekauda.config.example.ts") }];
 
@@ -70,7 +45,7 @@ function inputs(command: "build" | "serve"): Record<string, string> {
 
 export default defineConfig(({ command }) => ({
   root,
-  plugins: [react(), instanceHtml(), mpaDevRewrites()],
+  plugins: [react(), mpaDevRewrites()],
   publicDir: "public",
   build: {
     outDir: "dist",

@@ -2,6 +2,31 @@
  * Gallery-only sample data. Covers are generated SVGs (data: URIs are allowed by the CSP img-src) so the
  * gallery can show the hero over a very bright photo (worst case for white text) and a dark one.
  */
+import type { ConfigResponse } from "../../shared/api";
+
+/** A fictional tenant for the style guide, which runs without a Worker. */
+export const SAMPLE_CONFIG: ConfigResponse = {
+  className: "1.º de Básica A",
+  schoolName: "Colegio de Muestra",
+  classShortName: "1.º Básica A",
+  classMark: "1A",
+  banks: ["Banco de Muestra", "Cooperativa de Muestra"],
+  treasury: {
+    bank: "Banco de Muestra",
+    accountType: "Cuenta de ahorros",
+    accountNumber: "0000000000",
+    holder: "Titular de Muestra",
+    holderId: "0100000000",
+    deunaUrl: null,
+    qrUrl: null,
+    helpUrl: null,
+  },
+  earliestTransferDate: "2026-01-01",
+  defaultTone: "#3D4FA3",
+  analytics: { gaMeasurementId: null },
+  auth: { mode: "password" },
+};
+
 const svg = (markup: string): string => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
 
 export const BRIGHT_COVER = svg(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000">

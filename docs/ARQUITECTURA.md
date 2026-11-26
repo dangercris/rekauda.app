@@ -89,7 +89,7 @@ Otros módulos compartidos: `instance-config.ts`, `instance-validation.ts` e `in
 
 ### Configuración por instancia
 
-Los valores propios de cada curso están en `rekauda.config.ts` (local, fuera de git; plantilla en `rekauda.config.example.ts`). `src/shared/instance-config.ts` define los tipos, `src/shared/instance-validation.ts` aplica reglas que hacen fallar la carga si algo es inválido, y `src/shared/instance.ts` expone los valores ya resueltos al Worker, al cliente y a Vite (que rellena los títulos HTML con marcadores `%REKAUDA_*%`). `scripts/ensure-config.mjs` crea los archivos locales desde las plantillas cuando faltan. Las pruebas usan siempre la plantilla de ejemplo mediante un alias de Vitest.
+Los valores propios de cada curso están en `rekauda.config.ts` (local, fuera de git; plantilla en `rekauda.config.example.ts`). `src/shared/instance-config.ts` define los tipos, `src/shared/instance-validation.ts` aplica reglas que hacen fallar la carga si algo es inválido, y `src/shared/instance.ts` resuelve los valores. El Worker los lee desde `BundledConfigStore` (modo single, a partir de `rekauda.config.ts`) o desde `tenants.config_json` (modo multi), los inyecta en cada página como JSON en `<script type="application/json" id="rekauda-config">` junto con el título y la descripción, y el cliente los toma con `ConfigProvider` (con respaldo a `GET /api/config`). El cliente ya no importa `rekauda.config.ts`. `scripts/ensure-config.mjs` crea los archivos locales desde las plantillas cuando faltan. Las pruebas usan siempre la plantilla de ejemplo mediante un alias de Vitest.
 
 ## API pública
 
@@ -147,7 +147,7 @@ La sesión es una cookie `adm` con `HttpOnly`, `Secure`, `SameSite=Strict` y `Pa
 | Cloudflare Web Analytics | Baliza sin cookies que Cloudflare inyecta en el sitio | Visitas agregadas |
 | Panel de administración | Nunca | Su CSP no permite ninguna de las dos |
 
-- El ID de GA4 es `analytics.gaMeasurementId` de `rekauda.config.ts` (lo lee `src/client/public/lib/analytics/config.ts`). Con `null`, las analíticas quedan apagadas por completo: no aparece el aviso, ni el botón del pie, ni se carga nada.
+- El ID de GA4 es `analytics.gaMeasurementId` de la configuración del curso (llega al cliente por `ConfigProvider`). Con `null`, las analíticas quedan apagadas por completo: no aparece el aviso, ni el botón del pie, ni se carga nada.
 - Se usa Consent Mode v2 con todo denegado por defecto. Al aceptar solo se concede `analytics_storage`. Al rechazar o retirar el consentimiento se desactiva el ID y se borran las cookies `_ga*`.
 - La elección se guarda en el navegador (`rec-analytics-consent`, con versión). Subir `CONSENT_VERSION` vuelve a preguntar a todos.
 - Eventos permitidos (`events.ts`): `pay_step_view`, `deuna_click`, `payment_submitted`, `payment_failed`, `status_lookup`, `share_click`. Una lista de claves permitidas descarta cualquier parámetro extra. Nunca se envían nombres, teléfonos, códigos, montos ni datos del comprobante.

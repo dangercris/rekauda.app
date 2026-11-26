@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { CLASS_MARK } from "../../../shared/instance-bundled";
 import { errorMessage, isApiRequestError } from "../../lib/api";
+import { useInstanceConfig } from "../../lib/config/useInstance";
 import { BrandPill, Button, Card, InfoNote, Notice, Spinner, TextField, Toggle } from "../../ui";
-import { CLASS_LABEL } from "../components/common";
 import type { SessionApi } from "./useSession";
 import styles from "./LoginView.module.css";
 
 /** Everything that is not the signed-in panel: checking, login form, setup notice, session check failure. */
 export function SessionGate({ session }: { session: SessionApi }) {
   const { state } = session;
+  const { classMark, classShortName } = useInstanceConfig();
   return (
     <main className={styles.page}>
-      <BrandPill mark={CLASS_MARK} title="Tesorería" subtitle={CLASS_LABEL} className={styles.brand} />
+      <BrandPill mark={classMark} title="Tesorería" subtitle={classShortName} className={styles.brand} />
       {state.status === "checking" && (
         <div className={styles.center}>
           <Spinner size={26} label="Verificando la sesión" />

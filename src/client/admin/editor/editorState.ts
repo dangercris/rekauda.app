@@ -3,7 +3,6 @@
  * Worker (src/worker/validation.ts), mapping of server errors to fields, and the request body.
  * Pure module: the component only dispatches and renders.
  */
-import { DEFAULT_TONE } from "../../../shared/instance-bundled";
 import type { AdminCollection, AdminCollectionInput, CollectionOption, CollectionStatus } from "../../../shared/api";
 import { normalizeHex } from "../../design";
 import { isApiRequestError } from "../../lib/api";
@@ -76,6 +75,8 @@ export type FieldKey =
 export type FieldErrors = Partial<Record<FieldKey, string>>;
 
 export interface EditorState {
+  /** The tenant's default tone: seeds new events and replaces an invalid one. */
+  defaultTone: string;
   draft: EditorDraft;
   /** Serialized draft at load or last save: the unsaved-changes baseline. */
   baseline: string;
@@ -116,7 +117,8 @@ export function emptyOption(): OptionDraft {
   return { uid: nextUid(), key: "", keyTouched: false, locked: false, label: "", detail: "", price: "" };
 }
 
-export function newDraft(): EditorDraft {
+/** `defaultTone` is the tenant's own default (config.defaultTone). */
+export function newDraft(defaultTone: string): EditorDraft {
   return {
     title: "",
     slug: "",
@@ -128,13 +130,13 @@ export function newDraft(): EditorDraft {
     deadline: "",
     maxPerPayment: DEFAULT_MAX_PER_PAYMENT,
     status: "abierta",
-    tone: DEFAULT_TONE,
+    tone: defaultTone,
     deunaLink: "",
     deunaLinkExpires: "",
   };
 }
 
-export function draftFromCollection(c: AdminCollection): EditorDraft {
+export function draftFromCollection(c: AdminCollection, defaultTone: string): EditorDraft {
   return {
     title: c.title,
     slug: c.slug,
@@ -154,7 +156,7 @@ export function draftFromCollection(c: AdminCollection): EditorDraft {
     deadline: c.deadline,
     maxPerPayment: c.maxPerPayment,
     status: c.status,
-    tone: normalizeHex(c.tone) ?? DEFAULT_TONE,
+    tone: normalizeHex(c.tone) ?? defaultTone,
     deunaLink: c.deunaLink ?? "",
     deunaLinkExpires: c.deunaLinkExpires ?? "",
   };
@@ -178,9 +180,9 @@ export function serializeDraft(d: EditorDraft): string {
   });
 }
 
-export function initEditor(collection: AdminCollection | null): EditorState {
-  const draft = collection ? draftFromCollection(collection) : newDraft();
-  return { draft, baseline: serializeDraft(draft), cover: { kind: "keep" }, errors: {}, formError: null, submitted: false };
+export function initEditor(collection: AdminCollection | null, defaultTone: string): EditorState {
+  const draft = collection ? draftFromCollection(collection, defaultTone) : newDraft(defaultTone);
+  return { defaultTone, draft, baseline: serializeDraft(draft), cover: { kind: "keep" }, errors: {}, formError: null, submitted: false };
 }
 
 export function isDirty(state: EditorState): boolean {
@@ -267,7 +269,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "serverError":
       return { ...state, errors: { ...state.errors, ...action.errors }, formError: action.formError };
     case "reset":
-      return initEditor(action.collection);
+      return initEditor(action.collection, state.defaultTone);
   }
 }
 
@@ -362,7 +364,7 @@ export function firstErrorKey(errors: FieldErrors, d: EditorDraft): FieldKey | n
 }
 
 /** Request body (assumes `validateDraft` returned no errors). */
-export function toInput(d: EditorDraft): AdminCollectionInput {
+export function toInput(d: EditorDraft, defaultTone: string): AdminCollectionInput {
   const deunaLink = d.deunaLink.trim();
   const options: CollectionOption[] = d.options.map((o) => ({
     key: o.key.trim(),
@@ -380,7 +382,7 @@ export function toInput(d: EditorDraft): AdminCollectionInput {
     deadline: d.deadline,
     maxPerPayment: d.maxPerPayment,
     status: d.status,
-    tone: normalizeHex(d.tone) ?? DEFAULT_TONE,
+    tone: normalizeHex(d.tone) ?? defaultTone,
     deunaLink: deunaLink || null,
     deunaLinkExpires: deunaLink ? d.deunaLinkExpires || null : null,
   };
