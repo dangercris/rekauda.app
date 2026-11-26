@@ -2,27 +2,31 @@
  * Payment collections for one school class (costumes, trips, gifts...).
  * Each collection has its own options and prices; parents pay by bank transfer and attach the receipt.
  *
- * Public API:  GET /api/config, GET /api/collections[/:slug[/board]], POST /api/payments, GET /api/lookup/:code,
+ * Public API:  GET /api/config (the tenant's public config, also inlined as boot JSON in the HTML), GET /api/assets/deuna-qr.<ext>, GET /api/collections[/:slug[/board]], POST /api/payments, GET /api/lookup/:code,
  *              GET /api/covers/<id>/<hash>.<ext>, GET /api/og/<slug>.jpg (link-preview card)
  * Admin API:   /api/admin/* (self-host: password login -> signed HttpOnly cookie; Cloud: disabled until D1 sessions)
  * Email:       email() handler for Deuna notifications (Email Routing), see src/worker/email/
  * Tenancy:     this file is the composition root. It resolves the tenant (Host header in multi mode, the seeded tenant in
  *              single mode) and hands handlers a RequestContext; handlers never see env.DB or env.RECEIPTS.
- * Pages:       GET /r/<slug> (SPA shell + link-preview tags); everything else is served as static assets.
+ * Pages:       GET /, /admin, /r/<slug> (SPA shell + tenant title, boot JSON and link-preview tags: src/worker/boot.ts);
+ *              everything else is served as static assets.
  * Contract:    src/shared/api.ts
  */
+import { serveDeunaQr } from "./assets";
 import { adminRoute } from "./admin";
 import type { AdminAuthConfig } from "./auth";
+import { serveFallback, servePage, serveShell } from "./boot";
 import { buildContext } from "./context";
 import { PlatformDb } from "./data/platform-db";
 import { handleEmail } from "./email/handler";
 import { collectionBoard, collectionDetail, listCollections } from "./collections";
 import { serveCover } from "./covers";
 import type { CloudEnv } from "./env";
-import { HttpError, enforceLimit, fail } from "./http";
-import { servePage } from "./og";
+import { HttpError, enforceLimit, fail, json } from "./http";
 import { serveOgImage } from "./og-image";
-import { createPayment, lookup, publicConfig } from "./payments";
+import { createPayment, lookup } from "./payments";
+import { toPublicConfig } from "./public-config";
+import { D1ConfigStore, type ConfigStore } from "./tenancy/config-store";
 import { tenancyState } from "./tenancy/runtime";
 import { HostTenantResolver, SingleTenantResolver, tenantNotFound, type TenantResolver } from "./tenancy/resolver";
 
@@ -57,7 +61,8 @@ export default {
     // The tenant is resolved lazily, after the forward, so a database problem never stops the mail reaching the treasurer.
     await handleEmail(message, env, async () => {
       const tenant = await resolverFor(env, null).resolve("");
-      return tenant ? buildContext(tenant, { db: env.DB, files: env.RECEIPTS }) : null;
+      const config = tenant ? await configStoreFor(env).load(tenant) : null;
+      return tenant && config ? buildContext(tenant, { db: env.DB, files: env.RECEIPTS }, config) : null;
     });
   },
 } satisfies ExportedHandler<CloudEnv>;
@@ -90,35 +95,30 @@ function adminAuth(env: CloudEnv): AdminAuthConfig | null {
   return { adminPassword: env.ADMIN_PASSWORD, sessionSecret: env.SESSION_SECRET, loginLimiter: env.LOGIN_LIMITER };
 }
 
-/** Routes that read the bundled instance config (src/shared/instance.ts) instead of per-tenant data. */
-function usesBundledConfig(method: string, pathname: string): boolean {
-  return (
-    pathname === "/api/config" ||
-    (pathname === "/api/payments" && method === "POST") ||
-    pathname.startsWith("/api/og/") ||
-    pathname === "/r" ||
-    pathname.startsWith("/r/")
-  );
+/** Multi: the tenant's validated `config_json` (cached per isolate). Single: the bundled config. */
+function configStoreFor(env: CloudEnv): ConfigStore {
+  return env.TENANCY === "multi" ? new D1ConfigStore(new PlatformDb(env.DB), tenancyState.configCache, tenancyState.configLastGood) : tenancyState.bundled;
 }
 
 async function route(request: Request, env: CloudEnv, ec: ExecutionContext, url: URL): Promise<Response> {
   const tenant = await resolverFor(env, request).resolve(url.host);
   if (!tenant) return tenantNotFound();
-  const rc = buildContext(tenant, { db: env.DB, files: env.RECEIPTS });
+  // A tenant without a valid config is not served at all: showing defaults would put someone else's account details on its pages.
+  const config = await configStoreFor(env).load(tenant);
+  if (!config) return fail(503, "not_ready", "Esta página aún no está disponible.");
+  const rc = buildContext(tenant, { db: env.DB, files: env.RECEIPTS }, config);
 
   const { pathname } = url;
   const method = request.method;
 
-  // Until tenant config is served from the database, these routes would show the bundled build-time instance
-  // (account number, banks, school name) to every tenant, so Cloud refuses them.
-  if (env.TENANCY === "multi" && usesBundledConfig(method, pathname)) return fail(503, "not_ready", "Esta función aún no está disponible.");
+  if (pathname === "/" || pathname === "/index.html") return serveShell(request, env, rc, url, "home");
+  if (pathname === "/admin" || pathname === "/admin.html") return serveShell(request, env, rc, url, "admin");
 
   const pageSlug = /^\/r\/([a-z0-9-]{1,48})(?:\/.*)?$/.exec(pathname)?.[1];
   if (pageSlug) return servePage(request, env, rc, url, pageSlug);
-  if (pathname.startsWith("/r/") || pathname === "/r") return env.ASSETS.fetch(request);
 
   if (pathname === "/api/payments" && method === "POST") return createPayment(request, rc, env);
-  if (pathname === "/api/config" && method === "GET") return publicConfig();
+  if (pathname === "/api/config" && method === "GET") return json(toPublicConfig(rc.config, env.TENANCY), 200, { "Cache-Control": "public, max-age=60" });
   if (pathname === "/api/collections" && method === "GET") return listCollections(rc);
 
   const collectionMatch = /^\/api\/collections\/([a-z0-9-]{1,48})(\/board)?$/.exec(pathname);
@@ -128,6 +128,9 @@ async function route(request: Request, env: CloudEnv, ec: ExecutionContext, url:
   const lookupCode = /^\/api\/lookup\/([A-Za-z0-9-]{1,12})$/.exec(pathname)?.[1];
   if (lookupCode && method === "GET") return lookup(request, rc, env, lookupCode);
 
+  const qrExt = /^\/api\/assets\/deuna-qr\.(png|jpg|webp)$/.exec(pathname)?.[1];
+  if (qrExt && (method === "GET" || method === "HEAD")) return serveDeunaQr(request, rc, qrExt);
+
   const coverPath = pathname.startsWith("/api/covers/") ? pathname.slice("/api/covers/".length) : null;
   if (coverPath !== null && method === "GET") return serveCover(rc, coverPath);
 
@@ -136,6 +139,7 @@ async function route(request: Request, env: CloudEnv, ec: ExecutionContext, url:
 
   if (pathname.startsWith("/api/admin/")) return adminRoute(request, rc, adminAuth(env), url);
 
-  if (!pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+  // Static files pass through; any HTML that comes back (SPA fallback for /admin/<sub>, /r, /foo) still gets this tenant's boot JSON.
+  if (!pathname.startsWith("/api/")) return serveFallback(request, env, rc, url);
   return fail(404, "not_found", "Ruta no encontrada.");
 }

@@ -50,12 +50,13 @@ export class TtlCache<V> {
     return undefined;
   }
 
-  set(key: string, value: V | null): void {
+  /** `ttlMs` overrides the default TTL of this entry (hit or miss). */
+  set(key: string, value: V | null, ttlMs?: number): void {
     this.hits.delete(key);
     this.misses.delete(key);
     const isMiss = value === null;
     const map = isMiss ? this.misses : this.hits;
-    map.set(key, { value, expiresAt: this.now() + (isMiss ? MISS_TTL_MS : HIT_TTL_MS) });
+    map.set(key, { value, expiresAt: this.now() + (ttlMs ?? (isMiss ? MISS_TTL_MS : HIT_TTL_MS)) });
     const max = isMiss ? this.maxMisses : this.maxEntries;
     while (map.size > max) {
       const oldest = map.keys().next();

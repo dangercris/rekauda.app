@@ -157,10 +157,18 @@ describe("raw binding allowlist", () => {
     expect(codeTokens("const re = /[/]DB/; const n = 4")).not.toContain("DB");
   });
 
-  it("sees all of og.ts (the old comment stripper hid about 1.7k characters of it)", () => {
-    const source = readFileSync(join(ROOT, "og.ts"), "utf8");
-    expect(codeTokens(source)).toContain("withPageHeaders");
-    expect(codeTokens(source)).toContain("HTMLRewriter");
+  it("sees all of og.ts and boot.ts (the old comment stripper hid about 1.7k characters of og.ts)", () => {
+    expect(codeTokens(readFileSync(join(ROOT, "og.ts"), "utf8"))).toContain("withPageHeaders");
+    expect(codeTokens(readFileSync(join(ROOT, "boot.ts"), "utf8"))).toContain("HTMLRewriter");
+  });
+
+  it("keeps the bundled config out of the Worker except behind the single-mode ConfigStore", () => {
+    const importsBundled = productionFiles(ROOT)
+      .filter((path) => /from "[^"]*(rekauda\.config|instance-bundled)"/.test(readFileSync(path, "utf8")))
+      .map((path) => relative(ROOT, path));
+    expect(importsBundled).toEqual(["tenancy/config-store.ts"]);
+    const tokens = codeTokens(readFileSync(join(ROOT, "constants.ts"), "utf8"));
+    expect(tokens.filter((t) => ["TREASURY", "BANKS", "SCHOOL_NAME", "CLASS_NAME", "DEFAULT_TONE", "EARLIEST_TRANSFER"].includes(t))).toEqual([]);
   });
 
   it("holds for every production file under src/worker", () => {

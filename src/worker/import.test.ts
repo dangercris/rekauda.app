@@ -5,6 +5,7 @@ import { processDeunaRaw } from "./email/handler";
 import type { TestDb } from "./test/d1";
 import { TENANT_A } from "./test/d1-cloud";
 import { ADMIN_AUTH, adminCookie, createHarness, seedPaymentFor, type Harness } from "./test/harness";
+import { withInstance, TEST_INSTANCE } from "./test/config";
 import { generateKey, signMessage, type TestKey } from "./test/sign";
 
 const ORIGIN = "https://rekauda.test";
@@ -176,5 +177,12 @@ describe("processDeunaRaw", () => {
     const outcome = await processDeunaRaw(new TextEncoder().encode(raw), h.a);
     expect(outcome.status).toBe("ignored");
     if (outcome.status === "ignored") expect(outcome.signatures).toHaveLength(2);
+  });
+
+  it("checks the destination account against the config of the tenant being processed", async () => {
+    const raw = new TextEncoder().encode(await signMessage(key, headers(), TEXT));
+    const other = withInstance({ treasury: { ...TEST_INSTANCE.treasury, accountNumber: "0000001111" } });
+    expect(await processDeunaRaw(raw, { db: h.a.db, config: other })).toMatchObject({ status: "ignored", reason: "wrong_account" });
+    expect(await processDeunaRaw(raw, { db: h.a.db, config: TEST_INSTANCE })).toMatchObject({ status: "stored" });
   });
 });

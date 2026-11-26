@@ -2,7 +2,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { BoardResponse, CollectionDetail, CollectionsResponse, ConfigResponse } from "../../../shared/api";
 import { getBoard, getCollection, getConfig, listCollections } from "../../lib/publicApi";
-import { BANKS } from "../../../shared/instance";
+import { BANKS } from "../../../shared/instance-bundled";
 import { FALLBACK_CLASS_NAME, FALLBACK_SCHOOL_NAME } from "../lib/identity";
 import { useResource, type Resource } from "./useResource";
 

@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { ogVersion } from "./og-card";
+import { servePage } from "./boot";
 import { buildContext } from "./context";
-import type { BaseEnv } from "./env";
+import type { CloudEnv } from "./env";
+import { TEST_INSTANCE } from "./test/config";
 import { TENANT_A, TENANT_B } from "./test/d1-cloud";
 import { createHarness } from "./test/harness";
 import { FakeBucket, asR2 } from "./test/r2-fake";
-import { buildOgMeta, escapeAttr, metaEntries, metaTags, publicOrigin, servePage, truncateDescription, withPageHeaders } from "./og";
+import { buildOgMeta, escapeAttr, metaEntries, metaTags, publicOrigin, truncateDescription, withPageHeaders } from "./og";
 
 const ID = "c0000000-0000-4000-8000-000000000001";
 const base = { slug: "vestuario-musical", title: "Vestuario del musical", description: "Registra tu transferencia.", updated_at: "2026-11-26T06:00:00.000Z" };
@@ -38,8 +40,8 @@ describe("publicOrigin", () => {
 
 describe("buildOgMeta", () => {
   it("builds title, description and canonical url", () => {
-    expect(buildOgMeta(base, "https://x.test")).toEqual({
-      title: "Vestuario del musical · 1.º Básica A",
+    expect(buildOgMeta(base, "https://x.test", "Demo A")).toEqual({
+      title: "Vestuario del musical · Demo A",
       description: "Registra tu transferencia.",
       url: "https://x.test/r/vestuario-musical",
       image: IMAGE,
@@ -48,7 +50,7 @@ describe("buildOgMeta", () => {
   });
 
   it("changes the image url whenever the collection changes", () => {
-    const later = buildOgMeta({ ...base, updated_at: "2026-11-27T10:00:00.000Z" }, "https://x.test");
+    const later = buildOgMeta({ ...base, updated_at: "2026-11-27T10:00:00.000Z" }, "https://x.test", "Demo A");
     expect(later.image).not.toBe(IMAGE);
     expect(later.image).toMatch(/^https:\/\/x\.test\/api\/og\/vestuario-musical\.jpg\?v=1[0-9a-z]+$/);
   });
@@ -56,7 +58,7 @@ describe("buildOgMeta", () => {
 
 describe("meta tags", () => {
   it("always emits the generated card with its size and type", () => {
-    const entries = metaEntries(buildOgMeta(base, "https://x.test"));
+    const entries = metaEntries(buildOgMeta(base, "https://x.test", "Demo A"));
     expect(entries.map((e) => e.key)).toEqual([
       "description",
       "og:type",
@@ -81,7 +83,7 @@ describe("meta tags", () => {
 
   it("escapes every attribute value", () => {
     expect(escapeAttr(`a"b'c<d>&e`)).toBe("a&quot;b&#39;c&lt;d&gt;&amp;e");
-    const tags = metaTags(buildOgMeta({ ...base, title: `"><script>alert(1)</script>`, description: `<img src=x onerror=1>` }, "https://x.test"));
+    const tags = metaTags(buildOgMeta({ ...base, title: `"><script>alert(1)</script>`, description: `<img src=x onerror=1>` }, "https://x.test", "Demo A"));
     expect(tags).not.toContain("<script>");
     expect(tags).not.toContain("<img");
     expect(tags).toContain("&quot;&gt;&lt;script&gt;");
@@ -106,7 +108,7 @@ describe("withPageHeaders", () => {
 });
 
 describe("servePage", () => {
-  const assets = { ASSETS: { fetch: async () => new Response("<html><head><title>x</title></head></html>", { headers: { "content-type": "text/html" } }) } } as unknown as Pick<BaseEnv, "ASSETS">;
+  const assets = { TENANCY: "multi", ASSETS: { fetch: async () => new Response("<html><head><title>x</title></head></html>", { headers: { "content-type": "text/html" } }) } } as unknown as Pick<CloudEnv, "ASSETS" | "TENANCY">;
   const tenant = { id: TENANT_B, slug: "demo-b", r2Prefix: `t/${TENANT_B}/`, source: "cloud" as const };
 
   it("serves the plain shell with page headers when the collection lookup throws", async () => {
@@ -120,7 +122,7 @@ describe("servePage", () => {
         }),
       }),
     } as unknown as D1Database;
-    const rc = buildContext(tenant, { db: failing, files: asR2(new FakeBucket()) });
+    const rc = buildContext(tenant, { db: failing, files: asR2(new FakeBucket()) }, TEST_INSTANCE);
     const url = new URL("https://x.test/r/demo-collection");
     const res = await servePage(new Request(url), assets, rc, url, "demo-collection");
     expect(res.status).toBe(200);

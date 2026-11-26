@@ -43,6 +43,15 @@ export class PlatformDb {
     return toTenant(row);
   }
 
+  /** The stored runtime config of an ACTIVE tenant, or null. Untrusted JSON: ConfigStore validates it before use. */
+  async readTenantConfig(tenantId: string): Promise<{ configJson: string; qrKey: string | null; updatedAt: string } | null> {
+    const row = await this.db
+      .prepare("SELECT config_json, qr_key, updated_at FROM tenants WHERE id = ?1 AND status = 'active'")
+      .bind(tenantId)
+      .first<{ config_json: string; qr_key: string | null; updated_at: string }>();
+    return row ? { configJson: row.config_json, qrKey: row.qr_key, updatedAt: row.updated_at } : null;
+  }
+
   async findSelfHostTenant(): Promise<Tenant | null> {
     const row = await this.db
       .prepare(

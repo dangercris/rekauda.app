@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TenantScopeViolation } from "./data/tenant-db";
 import { buildContext } from "./context";
+import { TEST_INSTANCE } from "./test/config";
 import { TenantStorageViolation } from "./storage/tenant-storage";
 import { asD1 } from "./test/d1";
 import { TENANT_A, TENANT_B, createCloudTestDb } from "./test/d1-cloud";
@@ -14,13 +15,13 @@ function setup() {
   const spy = spyOnDb(createCloudTestDb({ seed: true }));
   const bucket = new FakeBucket();
   const bindings = { db: asD1(spy.db), files: asR2(bucket) };
-  return { spy, bucket, a: buildContext(tenant(TENANT_A, "demo-a"), bindings), b: buildContext(tenant(TENANT_B, "demo-b"), bindings) };
+  return { spy, bucket, a: buildContext(tenant(TENANT_A, "demo-a"), bindings, TEST_INSTANCE), b: buildContext(tenant(TENANT_B, "demo-b"), bindings, TEST_INSTANCE) };
 }
 
 describe("buildContext", () => {
-  it("exposes only the tenant, a tenant-bound db and a tenant-bound storage", () => {
+  it("exposes only the tenant, its config, a tenant-bound db and a tenant-bound storage", () => {
     const { a } = setup();
-    expect(Object.keys(a).sort()).toEqual(["db", "storage", "tenant"]);
+    expect(Object.keys(a).sort()).toEqual(["config", "db", "storage", "tenant"]);
     expect(a.tenant.id).toBe(TENANT_A);
     expect(a.db.tenantId).toBe(TENANT_A);
   });

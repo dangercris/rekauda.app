@@ -2,7 +2,7 @@ import type { TreasuryAccount } from "./api";
 
 /**
  * Everything that differs from one school to the next. Edit `rekauda.config.ts` (a local, untracked copy of
- * `rekauda.config.example.ts`); the rest of the code reads the resolved values from `src/shared/instance.ts`.
+ * `rekauda.config.example.ts`); the Worker reads it through the ConfigStore (`src/worker/tenancy/config-store.ts`); `src/shared/instance.ts` resolves any config.
  */
 export interface InstanceConfig {
   /** e.g. "Mi Colegio". Used in the footer disclaimer and the link-preview card. */

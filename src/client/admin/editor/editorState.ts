@@ -3,7 +3,7 @@
  * Worker (src/worker/validation.ts), mapping of server errors to fields, and the request body.
  * Pure module: the component only dispatches and renders.
  */
-import { DEFAULT_TONE } from "../../../shared/instance";
+import { DEFAULT_TONE } from "../../../shared/instance-bundled";
 import type { AdminCollection, AdminCollectionInput, CollectionOption, CollectionStatus } from "../../../shared/api";
 import { normalizeHex } from "../../design";
 import { isApiRequestError } from "../../lib/api";

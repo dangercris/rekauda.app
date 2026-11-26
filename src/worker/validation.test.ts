@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HttpError } from "./http";
+import { TEST_INSTANCE, withInstance } from "./test/config";
 import {
   boundedText,
   cleanText,
@@ -116,21 +117,28 @@ describe("parseTransferDate (Ecuador UTC-5)", () => {
   const now = Date.parse("2026-11-26T04:30:00Z");
 
   it("accepts today and tomorrow in Ecuador time", () => {
-    expect(parseTransferDate("2026-11-25", now)).toBe("2026-11-25");
-    expect(parseTransferDate("2026-11-26", now)).toBe("2026-11-26");
+    expect(parseTransferDate("2026-11-25", TEST_INSTANCE, now)).toBe("2026-11-25");
+    expect(parseTransferDate("2026-11-26", TEST_INSTANCE, now)).toBe("2026-11-26");
   });
 
   it("rejects dates after Ecuador tomorrow", () => {
-    expect(codeOf(() => parseTransferDate("2026-11-27", now))).toBe("invalid_date");
+    expect(codeOf(() => parseTransferDate("2026-11-27", TEST_INSTANCE, now))).toBe("invalid_date");
   });
 
   it("rejects dates before the earliest transfer", () => {
-    expect(codeOf(() => parseTransferDate("2026-10-31", now))).toBe("invalid_date");
-    expect(parseTransferDate("2026-11-01", now)).toBe("2026-11-01");
+    expect(codeOf(() => parseTransferDate("2026-10-31", TEST_INSTANCE, now))).toBe("invalid_date");
+    expect(parseTransferDate("2026-11-01", TEST_INSTANCE, now)).toBe("2026-11-01");
+  });
+
+  it("uses the earliest date and label of the config it is given", () => {
+    const later = withInstance({ earliestTransferDate: "2026-11-20", earliestTransferLabel: "noviembre de 2026 (B)" });
+    expect(codeOf(() => parseTransferDate("2026-11-19", later, now))).toBe("invalid_date");
+    expect(parseTransferDate("2026-11-20", later, now)).toBe("2026-11-20");
+    expect(() => parseTransferDate("2026-11-01", later, now)).toThrow(/noviembre de 2026 \(B\)/);
   });
 
   it.each(["", "25/11/2026", "2026-13-01", "2026-02-30x", "hoy"])("rejects malformed %j", (raw) => {
-    expect(codeOf(() => parseTransferDate(raw, now))).toBe("invalid_date");
+    expect(codeOf(() => parseTransferDate(raw, TEST_INSTANCE, now))).toBe("invalid_date");
   });
 });
 

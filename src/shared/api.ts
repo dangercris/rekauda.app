@@ -61,8 +61,19 @@ export interface ConfigResponse {
   className: string;
   /** e.g. "Mi Colegio". */
   schoolName: string;
+  /** e.g. "1.º Básica A". Short form for titles and previews. */
+  classShortName: string;
+  /** One to three characters shown in the brand avatar. */
+  classMark: string;
   banks: readonly string[];
   treasury: TreasuryAccount;
+  /** ISO date (YYYY-MM-DD): transfers dated before it are rejected. */
+  earliestTransferDate: string;
+  /** `#RRGGBB` tone proposed for new collections. */
+  defaultTone: string;
+  analytics: { gaMeasurementId: string | null };
+  /** How the admin signs in: the self-host password, or an emailed magic link (Cloud). */
+  auth: { mode: "password" | "magic_link" };
 }
 
 /** Generic success body (login, logout, session). 401 means signed out. */

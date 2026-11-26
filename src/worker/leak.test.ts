@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminMovementsResponse, AdminPaymentsResponse, BoardResponse, CollectionsResponse, LookupResponse } from "../shared/api";
 import { adminRoute } from "./admin";
 import { assertTenantScoped } from "./data/sql-scope";
-import { BANKS } from "./constants";
 import { collectionBoard, collectionDetail, listCollections } from "./collections";
 import { serveCover } from "./covers";
 import { processDeunaRaw } from "./email/handler";
@@ -99,7 +98,7 @@ describe("createPayment", () => {
       parentName: "Carolina Vasquez",
       phone: "0990000000",
       transferDate: today,
-      bank: BANKS[0] ?? "",
+      bank: "Other bank",
       amount: "10,00",
       ...extra,
     };

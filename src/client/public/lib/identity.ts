@@ -1,6 +1,6 @@
 /** Class identity copy derived from GET /api/config (with fallbacks while it loads or fails). */
 
-import { CLASS_NAME, CLASS_SHORT_NAME, SCHOOL_NAME } from "../../../shared/instance";
+import { CLASS_NAME, CLASS_SHORT_NAME, SCHOOL_NAME } from "../../../shared/instance-bundled";
 
 export const FALLBACK_CLASS_NAME: string = CLASS_NAME;
 export const FALLBACK_SCHOOL_NAME: string = SCHOOL_NAME;

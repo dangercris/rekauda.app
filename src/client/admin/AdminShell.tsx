@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { CLASS_MARK } from "../../shared/instance";
+import { CLASS_MARK } from "../../shared/instance-bundled";
 import { EventThemeProvider } from "../design";
 import { cx } from "../lib/cx";
 import { navigate } from "../lib/router";

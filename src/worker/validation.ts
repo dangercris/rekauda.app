@@ -1,6 +1,6 @@
 import { COLLECTION_STATUSES, type CollectionOption, type CollectionStatus } from "../shared/api";
 import { CODE_ALPHABET } from "./ids";
-import { EARLIEST_TRANSFER, EARLIEST_TRANSFER_LABEL } from "./constants";
+import type { Instance } from "../shared/instance";
 import { HttpError } from "./http";
 
 /** Pure parsers and text helpers. They throw HttpError with Spanish messages safe to show to families. */
@@ -79,13 +79,13 @@ export function parsePhone(raw: string): string {
 }
 
 /** Dates are Ecuador calendar days (UTC-5); `now` is injectable for tests. */
-export function parseTransferDate(raw: string, now: number = Date.now()): string {
+export function parseTransferDate(raw: string, config: Pick<Instance, "earliestTransferDate" | "earliestTransferLabel">, now: number = Date.now()): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw) || Number.isNaN(Date.parse(`${raw}T00:00:00Z`))) {
     throw new HttpError(400, "invalid_date", "Escribe la fecha de la transferencia.");
   }
   const tomorrowEc = new Date(now - 5 * 3600_000 + 86_400_000).toISOString().slice(0, 10);
-  if (raw < EARLIEST_TRANSFER || raw > tomorrowEc) {
-    throw new HttpError(400, "invalid_date", `La fecha de la transferencia no puede ser futura ni anterior a ${EARLIEST_TRANSFER_LABEL}.`);
+  if (raw < config.earliestTransferDate || raw > tomorrowEc) {
+    throw new HttpError(400, "invalid_date", `La fecha de la transferencia no puede ser futura ni anterior a ${config.earliestTransferLabel}.`);
   }
   return raw;
 }

@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
-import { CLASS_NAME, CLASS_SHORT_NAME } from "./src/shared/instance";
+import { CLASS_NAME, CLASS_SHORT_NAME } from "./src/shared/instance-bundled";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const entry = (file: string): string => fileURLToPath(new URL(file, import.meta.url));
@@ -82,6 +82,8 @@ export default defineConfig(({ command }) => ({
     },
   },
   server: {
+    // Tenants are <slug>.localhost in local Cloud development; the proxy keeps the Host header so the Worker can resolve them.
+    allowedHosts: [".localhost"],
     proxy: {
       "/api": { target: "http://localhost:8799", changeOrigin: false },
     },
@@ -104,6 +106,7 @@ export default defineConfig(({ command }) => ({
           name: "worker",
           alias: testAlias,
           environment: "node",
+          setupFiles: ["src/worker/test/setup.ts"],
           include: ["src/worker/**/*.test.ts", "src/shared/**/*.test.ts", "scripts/**/*.test.ts"],
         },
       },

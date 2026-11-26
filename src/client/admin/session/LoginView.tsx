@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { CLASS_MARK } from "../../../shared/instance";
+import { CLASS_MARK } from "../../../shared/instance-bundled";
 import { errorMessage, isApiRequestError } from "../../lib/api";
 import { BrandPill, Button, Card, InfoNote, Notice, Spinner, TextField, Toggle } from "../../ui";
 import { CLASS_LABEL } from "../components/common";

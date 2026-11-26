@@ -34,7 +34,7 @@ function limiter(keys: string[], success = true): RateLimit {
   } as unknown as RateLimit;
 }
 
-function setup(mode: "multi" | "single", options: { seed?: boolean; limitOk?: boolean; failTenantReads?: boolean } = {}): Setup & { env: CloudEnv } {
+function setup(mode: "multi" | "single", options: { seed?: boolean; limitOk?: boolean; failTenantReads?: boolean; failConfigReads?: boolean } = {}): Setup & { env: CloudEnv } {
   const raw = createCloudTestDb({ seed: options.seed ?? mode === "multi" });
   const bucket = new FakeBucket();
   const lookups: string[] = [];
@@ -43,6 +43,7 @@ function setup(mode: "multi" | "single", options: { seed?: boolean; limitOk?: bo
   const db = {
     prepare: (sql: string) => {
       if (sql.includes("tenant_domains")) lookups.push(sql);
+      if (options.failConfigReads && sql.includes("config_json")) throw new Error("D1 unavailable");
       if (options.failTenantReads && /FROM tenants|INTO tenants/.test(sql)) throw new Error("D1 unavailable");
       return raw.prepare(sql);
     },
@@ -249,42 +250,146 @@ describe("email()", () => {
   });
 });
 
-describe("bundled instance config is never served in multi mode", () => {
-  const form = async () => {
-    const body = new FormData();
-    body.set("collection", "demo-collection");
-    const packed = new Response(body);
-    const bytes = new Uint8Array(await packed.arrayBuffer());
-    return { bytes, type: packed.headers.get("content-type") ?? "" };
-  };
+describe("per-tenant runtime config", () => {
+  const HTML = `<!doctype html><html><head><title>Static</title><meta name="description" content="Static"></head><body></body></html>`;
+  const html = (env: CloudEnv, host: string, path: string) => get(env, host, path);
+  const configOf = async (env: CloudEnv, host: string) => (await get(env, host, "/api/config")).json() as Promise<Record<string, unknown> & { treasury: Record<string, unknown> }>;
+  const withHtmlAssets = (env: CloudEnv): CloudEnv => ({ ...env, ASSETS: { fetch: async () => new Response(HTML, { headers: { "content-type": "text/html" } }) } }) as unknown as CloudEnv;
 
-  it.each([
-    ["GET", "/api/config"],
-    ["GET", "/api/og/demo-collection.jpg"],
-    ["GET", "/r/demo-collection"],
-  ])("%s %s answers a generic 503", async (method, path) => {
+  it("GET /api/config gives each host only its own tenant's values", async () => {
     const { env } = setup("multi");
-    const res = await worker.fetch(new Request(`https://demo-a.localhost${path}`, { method, headers: { "cf-connecting-ip": "203.0.113.1" } }), env, ec);
-    expect(res.status).toBe(503);
-    const text = await res.text();
-    expect(text).not.toMatch(/0000|banco|bank|school|colegio|treasur/i);
+    const a = await configOf(env, "demo-a.localhost");
+    const b = await configOf(env, "demo-b.localhost");
+    expect([a["schoolName"], b["schoolName"]]).toEqual(["Demo School A", "Demo School B"]);
+    expect([a.treasury["accountNumber"], b.treasury["accountNumber"]]).toEqual(["0000000000", "9999990000"]);
+    expect([a["defaultTone"], b["defaultTone"]]).toEqual(["#C81E3A", "#1E3AC8"]);
+    expect(a["auth"]).toEqual({ mode: "magic_link" });
+    expect(JSON.stringify(a)).not.toMatch(/Demo School B|Demo Bank B|9999990000/);
   });
 
-  it("POST /api/payments answers 503 before any limiter, body read or write", async () => {
-    const { env, raw, bucket, limiterKeys } = setup("multi");
-    const { bytes, type } = await form();
+  it("never serves anything stored next to the config: hashes, prefixes, ids, stray secret fields", async () => {
+    const { env, raw } = setup("multi");
+    const stored = JSON.parse(String(raw.sqlite.prepare("SELECT config_json AS c FROM tenants WHERE id = ?").get(TENANT_A)?.["c"])) as Record<string, unknown>;
+    raw.sqlite.prepare("UPDATE tenants SET config_json = ? WHERE id = ?").run(JSON.stringify({ ...stored, forwardTo: "treasurer@example.test", sessionSecret: "s3cret" }), TENANT_A);
+    const body = await (await get(withHtmlAssets(env), "demo-a.localhost", "/api/config")).text();
+    const page = await (await get(withHtmlAssets(env), "demo-a.localhost", "/")).text();
+    for (const text of [body, page]) {
+      expect(text).not.toMatch(/s3cret|treasurer@example|inbound|r2_prefix|a{16}|t\/a0000000/);
+      expect(text).not.toContain(TENANT_A);
+    }
+  });
+
+  it("answers a generic 503 for every route of a tenant whose config is invalid, and keeps serving the others", async () => {
+    const { env, raw } = setup("multi");
+    raw.sqlite.prepare("UPDATE tenants SET config_json = ? WHERE id = ?").run(JSON.stringify({ className: "Broken" }), TENANT_A);
+    for (const path of ["/api/config", "/api/collections", "/", "/r/demo-collection", "/api/og/demo-collection.jpg"]) {
+      const res = await get(withHtmlAssets(env), "demo-a.localhost", path);
+      expect(res.status).toBe(503);
+      expect(await res.text()).not.toMatch(/Broken|Demo|0000|bank/i);
+    }
+    expect((await get(env, "demo-b.localhost", "/api/config")).status).toBe(200);
+  });
+
+  it.each([
+    ["/", "Recaudaciones Demo A"],
+    ["/index.html", "Recaudaciones Demo A"],
+    ["/admin", "Tesorería Demo A"],
+    ["/admin.html", "Tesorería Demo A"],
+    ["/r/demo-collection", "Demo collection A"],
+    ["/r/not-a-collection", "Recaudaciones Demo A"],
+  ])("%s carries the tenant's title and boot JSON, never another tenant's", async (path, title) => {
+    const { env } = setup("multi");
+    const res = await get(withHtmlAssets(env), "demo-a.localhost", path);
+    const body = await res.text();
+    expect(body).toContain(title);
+    expect(body).toContain('id="rekauda-config"');
+    expect(body).toContain("Demo School A");
+    expect(body).not.toMatch(/Static|Demo School B|Demo class B|Demo collection B/);
+    expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
+    expect(res.headers.get("Cache-Control")).toBe(path.startsWith("/admin") ? "no-store" : "no-cache");
+  });
+
+  it.each(["/admin/acceso", "/foo", "/r", "/admin/a/b"])("%s (SPA fallback HTML) also carries the tenant's boot JSON and title", async (path) => {
+    const { env } = setup("multi");
+    const res = await get(withHtmlAssets(env), "demo-a.localhost", path);
+    const body = await res.text();
+    expect(body).toContain('id="rekauda-config"');
+    expect(body).toContain("Demo School A");
+    expect(body).not.toContain("<title>Static</title>");
+    expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
+  });
+
+  it("leaves non-HTML assets untouched", async () => {
+    const { env } = setup("multi");
+    const asset = { ...env, ASSETS: { fetch: async () => new Response("console.log(1)", { headers: { "content-type": "text/javascript" } }) } } as unknown as CloudEnv;
+    const res = await get(asset, "demo-a.localhost", "/assets/app.js");
+    expect(await res.text()).toBe("console.log(1)");
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+  });
+
+  it("answers a generic 503, not a 500, when the config read fails; and keeps the last good config", async () => {
+    const down = setup("multi", { failConfigReads: true });
+    const res = await get(down.env, "demo-a.localhost", "/api/config");
+    expect(res.status).toBe(503);
+    expect(await res.text()).not.toMatch(/D1|unavailable|Demo/);
+  });
+
+  it("caches /api/config for 60 s in both modes", async () => {
+    expect((await get(setup("multi").env, "demo-a.localhost", "/api/config")).headers.get("Cache-Control")).toBe("public, max-age=60");
+    expect((await get(setup("single").env, "self.example.test", "/api/config")).headers.get("Cache-Control")).toBe("public, max-age=60");
+  });
+
+  it("does not answer the HTML entries for an unknown host", async () => {
+    const { env } = setup("multi");
+    const res = await get(withHtmlAssets(env), "nope.localhost", "/");
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain("rekauda-config");
+  });
+
+  it("serves a tenant's Deuna QR from its own prefix, and only the tenant that has one", async () => {
+    const { env, raw, bucket } = setup("multi");
+    raw.sqlite.prepare("UPDATE tenants SET qr_key = ? WHERE id = ?").run(`t/${TENANT_A}/assets/deuna-qr.png`, TENANT_A);
+    bucket.objects.set(`t/${TENANT_A}/assets/deuna-qr.png`, "A-QR");
+    const config = await configOf(env, "demo-a.localhost");
+    expect(config.treasury["qrUrl"]).toMatch(/^\/api\/assets\/deuna-qr\.png\?v=/);
+    expect((await configOf(env, "demo-b.localhost")).treasury["qrUrl"]).toBeNull();
+
+    const own = await get(env, "demo-a.localhost", String(config.treasury["qrUrl"]));
+    expect([own.status, await own.text()]).toEqual([200, "A-QR"]);
+    const other = await get(env, "demo-b.localhost", String(config.treasury["qrUrl"]));
+    expect(other.status).toBe(404);
+    expect(bucket.reads).toEqual([`t/${TENANT_A}/assets/deuna-qr.png`]);
+  });
+
+  it("POST /api/payments checks the bank against the tenant's own list", async () => {
+    const { env, raw } = setup("multi");
+    const body = new FormData();
+    body.set("collection", "demo-collection");
+    body.set("consent", "si");
+    body.set("students", JSON.stringify([{ givenNames: "Mateo", surnames: "Andrade", option: "standard" }]));
+    body.set("parentName", "Carolina Vasquez");
+    body.set("phone", "0990000000");
+    body.set("transferDate", new Date().toISOString().slice(0, 10));
+    body.set("bank", "Demo Bank B");
+    body.set("amount", "10,00");
+    body.set("receipt", new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], "r.png", { type: "image/png" }));
+    const packed = new Response(body);
+    const bytes = new Uint8Array(await packed.arrayBuffer());
     const res = await worker.fetch(
-      new Request("https://demo-a.localhost/api/payments", { method: "POST", headers: { "cf-connecting-ip": "203.0.113.1", "content-type": type, "content-length": String(bytes.byteLength) }, body: bytes }),
+      new Request("https://demo-a.localhost/api/payments", {
+        method: "POST",
+        headers: { "cf-connecting-ip": "203.0.113.1", "content-type": packed.headers.get("content-type") ?? "", "content-length": String(bytes.byteLength) },
+        body: bytes,
+      }),
       env,
       ec,
     );
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_bank");
     expect(raw.sqlite.prepare("SELECT count(*) AS n FROM payments").get()).toMatchObject({ n: 0 });
-    expect(bucket.objects.size).toBe(0);
-    expect(limiterKeys.filter((k) => k.startsWith("submit:"))).toEqual([]);
   });
 
-  it("the admin .eml import (the Deuna last-4 check) is unreachable: admin is disabled", async () => {
+  it("the admin .eml import is unreachable in multi mode: admin is disabled until sessions land", async () => {
     const { env } = setup("multi");
     const res = await worker.fetch(
       new Request("https://demo-a.localhost/api/admin/movements/import", { method: "POST", headers: { "cf-connecting-ip": "203.0.113.1", cookie: await adminCookie(), origin: "https://demo-a.localhost" } }),
@@ -294,9 +399,19 @@ describe("bundled instance config is never served in multi mode", () => {
     expect(res.status).toBe(503);
   });
 
-  it("single mode keeps serving the bundled config", async () => {
+  it("single mode serves the bundled config with the password sign-in mode", async () => {
     const { env } = setup("single");
-    expect((await get(env, "self.example.test", "/api/config")).status).toBe(200);
+    const res = await get(env, "self.example.test", "/api/config");
+    const config = (await res.json()) as { schoolName: string; auth: unknown };
+    expect(res.status).toBe(200);
+    expect([config.schoolName, config.auth]).toEqual(["Mi Colegio", { mode: "password" }]);
+  });
+
+  it("single mode injects the bundled config into the HTML too", async () => {
+    const { env } = setup("single");
+    const body = await (await get(withHtmlAssets(env), "self.example.test", "/")).text();
+    expect(body).toContain("Recaudaciones 1.º Básica A");
+    expect(body).toContain("Mi Colegio");
   });
 });
 

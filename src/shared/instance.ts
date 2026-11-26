@@ -1,21 +1,19 @@
 /**
- * The single place the app reads per-school values from. `rekauda.config.ts` (local, untracked) is validated
- * here when the module loads, so a bad value fails fast with a clear message instead of misbehaving at runtime.
- * Vitest aliases `rekauda.config` to `rekauda.config.example.ts`, so tests never depend on the local file.
+ * Resolution of per-school values. Pure: nothing is read or validated when this module loads, so the Worker can
+ * resolve a different config for every tenant. The bundled `rekauda.config.ts` is read elsewhere (the single-mode
+ * ConfigStore on the server, `instance-bundled.ts` for the client until it gets a ConfigProvider).
  */
-import config from "../../rekauda.config";
+import type { InstanceConfig } from "./instance-config";
 import { monthYearEs, validateInstanceConfig } from "./instance-validation";
 
-const instance = validateInstanceConfig(config);
+/** A validated config plus the values derived from it. */
+export interface Instance extends InstanceConfig {
+  /** "noviembre de 2026": used in the "date is too old" messages. */
+  readonly earliestTransferLabel: string;
+}
 
-export const SCHOOL_NAME = instance.schoolName;
-export const CLASS_NAME = instance.className;
-export const CLASS_SHORT_NAME = instance.classShortName;
-export const CLASS_MARK = instance.classMark;
-export const TREASURY = instance.treasury;
-export const BANKS = instance.banks;
-export const EARLIEST_TRANSFER = instance.earliestTransferDate;
-/** "noviembre de 2026": used in the "date is too old" messages. */
-export const EARLIEST_TRANSFER_LABEL = monthYearEs(instance.earliestTransferDate);
-export const DEFAULT_TONE = instance.defaultTone;
-export const GA_MEASUREMENT_ID: string | null = instance.analytics.gaMeasurementId;
+/** Validates `config` (fail-fast, naming the field) and derives the display values. */
+export function resolveInstance(config: InstanceConfig, source?: string): Instance {
+  const valid = validateInstanceConfig(config, source);
+  return { ...valid, earliestTransferLabel: monthYearEs(valid.earliestTransferDate) };
+}

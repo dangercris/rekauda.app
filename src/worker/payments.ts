@@ -1,10 +1,10 @@
 import type { RequestContext } from "./context";
 import type { BaseEnv } from "./env";
 import { receiptKey } from "./storage/keys";
-import type { ConfigResponse, CreatePaymentResponse, LookupResponse } from "../shared/api";
+import type { CreatePaymentResponse, LookupResponse } from "../shared/api";
 import { autoLinkPayment } from "./email/auto-link";
 import { findPublicCollection, parseOptions } from "./collections";
-import { BANKS, CLASS_NAME, MAX_ACTIVE_PAYMENTS, MAX_BODY_BYTES, MAX_FILE_BYTES, SCHOOL_NAME, TREASURY } from "./constants";
+import { MAX_ACTIVE_PAYMENTS, MAX_BODY_BYTES, MAX_FILE_BYTES } from "./constants";
 import { HttpError, clientIp, enforceLimit, json, readMultipart } from "./http";
 import { randomCode, sha256Hex, uniqueCode } from "./ids";
 import type { PaymentRow } from "./rows";
@@ -23,14 +23,8 @@ import {
 
 const TOO_LARGE = "El comprobante supera los 5 MB. Sube una captura más liviana.";
 
-export function publicConfig(): Response {
-  return json({ className: CLASS_NAME, schoolName: SCHOOL_NAME, banks: BANKS, treasury: TREASURY } satisfies ConfigResponse, 200, {
-    "Cache-Control": "public, max-age=300",
-  });
-}
-
 export async function createPayment(request: Request, rc: RequestContext, env: Pick<BaseEnv, "SUBMIT_LIMITER">): Promise<Response> {
-  const { db, storage } = rc;
+  const { db, storage, config } = rc;
   await enforceLimit(env.SUBMIT_LIMITER, `submit:${clientIp(request)}`);
   const form = await readMultipart(request, MAX_BODY_BYTES, TOO_LARGE);
 
@@ -58,9 +52,9 @@ export async function createPayment(request: Request, rc: RequestContext, env: P
   const students = parseStudents(text(form.get("students")), options, collection.max_per_payment);
   const parentName = personName(text(form.get("parentName")), "el nombre del representante");
   const phone = parsePhone(text(form.get("phone")));
-  const transferDate = parseTransferDate(text(form.get("transferDate")));
+  const transferDate = parseTransferDate(text(form.get("transferDate")), config);
   const bank = text(form.get("bank"));
-  if (!BANKS.includes(bank)) throw new HttpError(400, "invalid_bank", "Elige el banco o cooperativa desde el que transferiste.");
+  if (!config.banks.includes(bank)) throw new HttpError(400, "invalid_bank", "Elige el banco o cooperativa desde el que transferiste.");
   const amountCents = parseAmount(text(form.get("amount")));
   const reference = parseReference(text(form.get("reference")));
 

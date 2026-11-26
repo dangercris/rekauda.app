@@ -5,7 +5,7 @@ import type {
   AdminCollectionsResponse,
   PaymentStatus,
 } from "../shared/api";
-import { DEFAULT_MAX_PER_PAYMENT, DEFAULT_TONE, MAX_COLLECTION_JSON_BYTES } from "./constants";
+import { DEFAULT_MAX_PER_PAYMENT, MAX_COLLECTION_JSON_BYTES } from "./constants";
 import { parseNotes, parseOptions } from "./collections";
 import type { RequestContext } from "./context";
 import type { TenantDb } from "./data/tenant-db";
@@ -126,7 +126,7 @@ export async function createCollection(request: Request, rc: RequestContext): Pr
     deadline: parsed.deadline as string,
     status: parsed.status ?? "abierta",
     maxPerPayment: parsed.maxPerPayment ?? DEFAULT_MAX_PER_PAYMENT,
-    tone: parsed.tone ?? DEFAULT_TONE,
+    tone: parsed.tone ?? rc.config.defaultTone,
     deunaLink: parsed.deunaLink ?? null,
     deunaLinkExpires: parsed.deunaLink ? (parsed.deunaLinkExpires ?? null) : null,
   };

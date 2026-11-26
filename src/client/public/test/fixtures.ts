@@ -12,6 +12,8 @@ import type {
 export const config: ConfigResponse = {
   className: "1.º de Básica A",
   schoolName: "Mi Colegio",
+  classShortName: "1.º Básica A",
+  classMark: "1A",
   banks: ["Banco Pichincha / Deuna", "Produbanco", "Otro banco o cooperativa"],
   treasury: {
     bank: "Banco Pichincha",
@@ -23,6 +25,10 @@ export const config: ConfigResponse = {
     qrUrl: "/deuna-qr.png",
     helpUrl: "https://example.com/ayuda",
   },
+  earliestTransferDate: "2026-11-01",
+  defaultTone: "#C81E3A",
+  analytics: { gaMeasurementId: null },
+  auth: { mode: "password" },
 };
 
 export const musical: CollectionDetail = {

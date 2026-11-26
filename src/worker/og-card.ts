@@ -1,6 +1,6 @@
 import { ambientColors, mix, normalizeHex, pickInk, WHITE } from "../shared/tone";
 import { parseOptions } from "./collections";
-import { CLASS_NAME, DEFAULT_TONE, SCHOOL_NAME } from "./constants";
+import type { Instance } from "../shared/instance";
 import type { CollectionRow } from "./rows";
 
 /**
@@ -63,19 +63,19 @@ export function ogVersion(row: Pick<CollectionRow, "updated_at">): string {
   return `${OG_RENDER_VERSION}${Number.isFinite(t) ? t.toString(36) : "0"}`;
 }
 
-export function buildOgCard(row: OgCardSource): OgCard {
+export function buildOgCard(row: OgCardSource, config: Pick<Instance, "schoolName" | "className" | "defaultTone">): OgCard {
   const options = parseOptions(row.options_json);
   const prices = options.map((o) => o.cents).filter((c) => c > 0);
   const min = prices.length ? Math.min(...prices) : 0;
   const varied = prices.some((c) => c !== min);
   const money = splitMoney(min);
 
-  const tone = normalizeHex(row.tone) ?? DEFAULT_TONE;
+  const tone = normalizeHex(row.tone) ?? config.defaultTone;
   const { secondary, accent } = ambientColors(tone);
   const closed = row.status !== "abierta";
 
   return {
-    school: `${SCHOOL_NAME} · ${CLASS_NAME}`,
+    school: `${config.schoolName} · ${config.className}`,
     eyebrow: row.eyebrow?.trim() || null,
     title: row.title.trim(),
     priceWhole: money.whole,
