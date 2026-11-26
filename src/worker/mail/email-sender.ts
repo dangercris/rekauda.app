@@ -1,11 +1,18 @@
 import { assertAddress, assertHeaderValue } from "./mime";
 
-/** What the platform sends: one recipient, a subject and a text body, optionally an html alternative. */
+export interface OutgoingAttachment {
+  filename: string;
+  type: string;
+  content: Uint8Array;
+}
+
+/** What the platform sends: one recipient, a subject and a text body, optionally an html alternative and attachments. */
 export interface OutgoingEmail {
   to: string;
   subject: string;
   text: string;
   html?: string;
+  attachments?: OutgoingAttachment[];
 }
 
 /** Port for outbound mail. Handlers depend on this, never on the vendor binding. */
@@ -34,6 +41,16 @@ export class CloudflareEmailSender implements EmailSender {
       subject: assertHeaderValue(email.subject),
       text: email.text,
       ...(email.html === undefined ? {} : { html: email.html }),
+      ...(email.attachments === undefined
+        ? {}
+        : {
+            attachments: email.attachments.map((a) => ({
+              disposition: "attachment" as const,
+              filename: assertHeaderValue(a.filename),
+              type: assertHeaderValue(a.type),
+              content: a.content,
+            })),
+          }),
     };
     await this.binding.send(message);
   }

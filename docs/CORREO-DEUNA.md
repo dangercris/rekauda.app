@@ -164,6 +164,39 @@ Cada fila corresponde a un evento de los registros (y al motivo que muestra la i
 
 Si un pago real aparece con piezas faltantes de forma repetida, Deuna probablemente cambió el formato del correo. Abre un issue en el repositorio sin pegar datos personales: basta con el campo `missing`.
 
+## Rekauda Cloud (varios cursos en una sola instalación)
+
+Esta sección es para quien opera la versión Cloud. Si autoalojas Rekauda, ignórala: todo lo anterior sigue igual.
+
+En Cloud no hay una regla de Email Routing por curso. Hay una sola regla catch-all en un subdominio de entrada (`INBOUND_DOMAIN`, por ejemplo `in.tu-dominio.net`) que entrega todo al Worker. El curso se identifica por la dirección de destino, que tiene la forma `d-<token>@INBOUND_DOMAIN`:
+
+- El token son entre 16 y 64 caracteres en minúscula y números, por ejemplo el resultado de `openssl rand -hex 16`. En la base de datos solo se guarda su SHA-256 (`tenants.inbound_token_hash`), nunca el token.
+- Una dirección desconocida, de otro dominio o con variantes como `d-<token>+algo@...` se rechaza antes de leer el mensaje, sin guardar ni reenviar nada. Los registros no incluyen la dirección.
+- El orden es siempre el mismo: leer el mensaje (máx. 1 MB), verificar remitente y DKIM una sola vez, avisar a la tesorería, archivar el original y recién después procesar. Si un paso falla, se registra y los demás siguen.
+- El aviso es un correo a los dueños y cotesoreros del curso. **El original se adjunta como `correo.eml` solo si es un correo de Deuna verificado** (remitente exacto y DKIM con `d=deunaapp.com`). Cualquier otro mensaje (sin firma, remitente falso, clave DNS no disponible) genera un aviso solo de texto: "Llegó un correo que no pudimos verificar como de Deuna; revisa tu cuenta de Deuna". Así la dirección secreta no sirve para hacer llegar contenido ajeno a la tesorería. Los mensajes de más de 1 MB o ilegibles también van sin adjunto, con un texto distinto.
+- Cada curso tiene un tope de avisos por minuto (limitador `LOOKUP_LIMITER`, clave `inbound-notice:<id del curso>`). Pasado el tope no se envía aviso, pero el original se archiva y se procesa, y queda el registro `inbound_notice_capped`.
+- Un curso sin dueños ni cotesoreros no puede recibir avisos: su correo se rechaza antes de leerlo (`inbound_mail_no_recipients`). Si el aviso falla y además el archivo falla o no existe, se registra `deuna_mail_lost` como error, para poder crear una alerta. Después de leer el mensaje ya no se intenta rechazarlo.
+- El original se guarda en el bucket aparte `MAIL_ARCHIVE`, con la clave `t/<id del curso>/<AAAA-MM-DD>/<uuid>.eml`.
+- La verificación (remitente exacto y DKIM con `d=deunaapp.com`) y el análisis son los mismos de siempre. Solo se comparan los pagos del curso destinatario, y la automatización nunca marca `pagado`.
+
+### Retención de 30 días
+
+Un cron diario (`triggers.crons` en `wrangler.cloud.example.jsonc`, handler `scheduled()`) elimina los originales con más de 30 días según la fecha de la clave. Es solo configuración: empieza a correr cuando se despliega esa configuración.
+
+Como segunda capa recomendada, y como paso manual del dueño, crea una regla de ciclo de vida en el bucket `MAIL_ARCHIVE` que elimine los objetos a los 30 días. En el panel de Cloudflare: **R2**, el bucket de correo, **Settings**, **Object lifecycle rules**, regla de eliminación a los 30 días sobre todos los objetos. Se hace una sola vez, a mano, y no forma parte de ningún script.
+
+**Cómo verificar.** La regla aparece en la lista del bucket con 30 días y los registros muestran `mail_archive_purged` una vez al día.
+
+### Verificaciones pendientes en un entorno real (lista de sandbox)
+
+Nada de esto está comprobado todavía, porque las pruebas automáticas usan dobles:
+
+- Que `send_email` acepte el adjunto `message/rfc822` (tamaño máximo y cuotas incluidos).
+- Dónde cae el aviso con adjunto `.eml` (bandeja o spam) y si el remitente `no-reply@` del dominio raíz está incorporado.
+- Que se invoque una vez por destinatario y que un destinatario con error no impida los demás.
+- Que la dirección de destino del mensaje llegue como `d-<token>@INBOUND_DOMAIN` con el catch-all, y que un destinatario desconocido se rechace sin leer el cuerpo.
+- Un correo real de Deuna de punta a punta (DKIM verificado, aviso con adjunto, movimiento registrado).
+
 ## Seguridad
 
 - **Mantén la dirección secreta.** Quien la conozca puede enviarle correos al Worker. No la publiques en la página, en WhatsApp ni en el repositorio.

@@ -52,6 +52,27 @@ export class PlatformDb {
     return row ? { configJson: row.config_json, qrKey: row.qr_key, updatedAt: row.updated_at } : null;
   }
 
+  /** Active tenant whose inbound mail token has this SHA-256 hash, or null (unknown and suspended look the same). */
+  async findActiveTenantByInboundTokenHash(tokenHash: string): Promise<Tenant | null> {
+    const row = await this.db
+      .prepare("SELECT id, slug, r2_prefix, source FROM tenants WHERE inbound_token_hash = ?1 AND status = 'active'")
+      .bind(tokenHash)
+      .first<TenantRow>();
+    return toTenant(row);
+  }
+
+  /** Emails of the people who run this tenant (owners and co-treasurers; never the synthetic self-host owner), in a stable order. */
+  async listNotificationRecipients(tenantId: string): Promise<string[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id
+         WHERE m.tenant_id = ?1 AND u.kind = 'person' AND m.role IN ('owner', 'co_treasurer') ORDER BY u.email`,
+      )
+      .bind(tenantId)
+      .all<{ email: string }>();
+    return results.map((r) => r.email);
+  }
+
   /** The person (never the synthetic self-host owner) with this email who holds a membership in this tenant, or null. */
   async findMemberByEmail(tenantId: string, email: string): Promise<{ userId: string } | null> {
     const row = await this.db

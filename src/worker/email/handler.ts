@@ -1,15 +1,18 @@
 /**
  * Cloudflare Email Routing handler. The treasurer's Deuna account sends its "Recibiste $X" notifications to a
- * secret address on this domain. Every message is forwarded to the treasurer first, no matter what; then, only
- * for genuine Deuna mail (From + DKIM), the transfer is stored and matched to a registered payment.
+ * secret address. Every message is delivered to the treasurer first, no matter what (Email Routing forward in
+ * self-host, a notification mail in Cloud); then archived; then, only for genuine Deuna mail (From + DKIM), the
+ * transfer is stored and matched to a registered payment of the resolved tenant.
  *
- * Logs are structured JSON. They never include the forward address, and payer data only stays in D1.
+ * Logs are structured JSON. They never include addresses or tokens, and payer data only stays in D1.
  */
 import PostalMime from "postal-mime";
 import type { DeunaImportResult } from "../../shared/api";
 import type { RequestContext } from "../context";
-import type { SingleEnv } from "../env";
+import { NoticeCapped, type MailForwarder } from "../mail/mail-forwarder";
 import { insertMovement } from "../movements";
+import type { RawMailArchive } from "../storage/mail-archive";
+import type { Tenant } from "../tenancy/tenant";
 import { autoLinkMovement } from "./auto-link";
 import { verifyDkim, type DkimResult } from "./dkim";
 import { parseDeunaDetailed } from "./deuna";
@@ -17,8 +20,6 @@ import { parseDeunaDetailed } from "./deuna";
 export const DEUNA_SENDER = "notificaciones@deunaapp.com";
 export const DEUNA_DOMAIN = "deunaapp.com";
 export const MAX_RAW_BYTES = 1024 * 1024;
-
-type EmailEnv = Pick<SingleEnv, "FORWARD_TO">;
 
 export interface EmailDeps {
   verify?: (raw: Uint8Array) => Promise<DkimResult>;
@@ -33,11 +34,22 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Reads the raw message, never more than MAX_RAW_BYTES. Returns null when it is too large. */
-async function readRaw(message: ForwardableEmailMessage): Promise<Uint8Array | null> {
+type RawRead = Uint8Array | "too_large" | "unreadable";
+
+/** Reads the raw message, never more than MAX_RAW_BYTES. Returns why it could not when it is too large or the stream fails. */
+async function readRaw(message: ForwardableEmailMessage): Promise<RawRead> {
+  try {
+    return await readBounded(message);
+  } catch (e) {
+    log("deuna_mail_read_failed", { error: errorText(e) });
+    return "unreadable";
+  }
+}
+
+async function readBounded(message: ForwardableEmailMessage): Promise<RawRead> {
   if (message.rawSize > MAX_RAW_BYTES) {
     log("deuna_mail_ignored", { reason: "too_large", size: message.rawSize });
-    return null;
+    return "too_large";
   }
   const reader = message.raw.getReader();
   const chunks: Uint8Array[] = [];
@@ -49,7 +61,7 @@ async function readRaw(message: ForwardableEmailMessage): Promise<Uint8Array | n
     if (total > MAX_RAW_BYTES) {
       await reader.cancel();
       log("deuna_mail_ignored", { reason: "too_large", size: total });
-      return null;
+      return "too_large";
     }
     chunks.push(value);
   }
@@ -62,36 +74,88 @@ async function readRaw(message: ForwardableEmailMessage): Promise<Uint8Array | n
   return bytes;
 }
 
-/** Resolves the tenant context lazily, AFTER the forward: a database problem must never stop the mail reaching the treasurer. */
-export type ContextProvider = () => Promise<RequestContext | null>;
-
-export async function handleEmail(message: ForwardableEmailMessage, env: EmailEnv, getContext: ContextProvider, deps: EmailDeps = {}): Promise<void> {
-  // 1. Buffer the raw stream BEFORE forwarding: it is not guaranteed to be readable afterwards.
-  let raw: Uint8Array | null = null;
+/** True only for the exact Deuna sender AND a passing DKIM signature from deunaapp.com: the same two checks processDeunaRaw applies. Never throws. */
+async function isVerifiedDeuna(raw: Uint8Array, verify: (raw: Uint8Array) => Promise<DkimResult>): Promise<boolean> {
   try {
-    raw = await readRaw(message);
+    const email = await PostalMime.parse(raw);
+    return email.from?.address?.trim().toLowerCase() === DEUNA_SENDER && (await verify(raw)).ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * How one inbound message is routed. Multi mode knows the tenant from the recipient before anything is read; single mode
+ * resolves it lazily, AFTER the forward, so a database problem never stops the mail reaching the treasurer.
+ */
+export interface InboundRoute {
+  forwarder: MailForwarder;
+  /** Null: nothing is retained (self-host without a mail bucket). */
+  archive: RawMailArchive | null;
+  /** Cloud: verify From + DKIM BEFORE delivering, because the verdict decides whether the original may be attached. Self-host: false, it forwards first, unconditionally. */
+  verifyBeforeDeliver: boolean;
+  resolveTenant: () => Promise<Tenant | null>;
+  loadContext: (tenant: Tenant) => Promise<RequestContext | null>;
+}
+
+/**
+ * Order is fixed in both modes: buffer the raw stream (it is not guaranteed to be readable afterwards), deliver a copy
+ * to the treasurer FIRST (always, even if reading failed), archive the raw message, then process. Cloud routes verify
+ * DKIM once before delivering and reuse that result for processing. Each step is independent: a failure is logged
+ * without addresses and never stops the next one. When neither the delivery nor the archive worked, the mail is lost
+ * and `deuna_mail_lost` is logged at error level so it can be alerted on.
+ */
+export async function handleEmail(message: ForwardableEmailMessage, route: InboundRoute, deps: EmailDeps = {}): Promise<void> {
+  const read = await readRaw(message);
+  const raw = typeof read === "string" ? null : read;
+  const unbuffered = typeof read === "string" ? read : null;
+
+  let verify = deps.verify ?? ((bytes: Uint8Array) => verifyDkim(bytes, { domain: DEUNA_DOMAIN }));
+  let verified = false;
+  if (route.verifyBeforeDeliver && raw) {
+    const base = verify;
+    let cached: Promise<DkimResult> | undefined;
+    verify = (bytes) => (cached ??= base(bytes));
+    verified = await isVerifiedDeuna(raw, verify);
+  }
+  const processing: EmailDeps = { ...deps, verify };
+
+  let delivered = false;
+  try {
+    await route.forwarder.deliver(message, raw, { verified, unbuffered });
+    delivered = true;
   } catch (e) {
-    log("deuna_mail_read_failed", { error: errorText(e) });
+    if (e instanceof NoticeCapped) log("inbound_notice_capped");
+    else log("deuna_mail_forward_failed", { error: errorText(e) });
   }
 
-  // 2. Always forward, even when reading failed. A forward failure must not stop the processing.
+  let archived = false;
   try {
-    await message.forward(env.FORWARD_TO);
-  } catch (e) {
-    log("deuna_mail_forward_failed", { error: errorText(e) });
-  }
-
-  // 3. Process the buffered bytes. Any failure is logged and swallowed: the mail was already forwarded.
-  if (!raw) return;
-  try {
-    const rc = await getContext();
+    // Nothing buffered (too large or unreadable): nothing to archive or process. The mail was already delivered.
+    if (!raw) return;
+    const tenant = await route.resolveTenant();
+    if (!tenant) {
+      log("deuna_mail_ignored", { reason: "no_tenant" });
+      return;
+    }
+    if (route.archive) {
+      try {
+        await route.archive.put(tenant.id, raw);
+        archived = true;
+      } catch (e) {
+        log("deuna_mail_archive_failed", { error: errorText(e) });
+      }
+    }
+    const rc = await route.loadContext(tenant);
     if (!rc) {
       log("deuna_mail_ignored", { reason: "no_tenant" });
       return;
     }
-    await processDeunaRaw(raw, rc, deps);
+    await processDeunaRaw(raw, rc, processing);
   } catch (e) {
     log("deuna_mail_error", { error: errorText(e) });
+  } finally {
+    if (!delivered && !archived) console.error(JSON.stringify({ message: "deuna_mail_lost" }));
   }
 }
 

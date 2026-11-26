@@ -5,7 +5,10 @@ import { createHarness, seedPaymentFor, type Harness, type SeedPaymentInput } fr
 import { generateKey, signMessage, txtFor, type TestKey } from "../test/sign";
 import { autoLinkPayment } from "./auto-link";
 import { verifyDkim } from "./dkim";
-import { handleEmail, MAX_RAW_BYTES } from "./handler";
+import { EmailRoutingForwarder } from "../mail/mail-forwarder";
+import { FakeBucket, asR2 } from "../test/r2-fake";
+import { R2MailArchive } from "../storage/mail-archive";
+import { handleEmail, MAX_RAW_BYTES, type InboundRoute } from "./handler";
 
 const NOW = new Date("2026-11-26T15:00:00.000Z");
 
@@ -65,10 +68,17 @@ const seedPayment = (overrides?: SeedPaymentInput): string => seedPaymentFor(h.r
 let key: TestKey;
 let logs: Array<Record<string, unknown>>;
 
-const ctxOf = async () => h.a;
-const env = () => ({ FORWARD_TO: "treasurer@example.test" });
+/** Single-mode shape: Email Routing forward, no archive, tenant and context resolved lazily after the forward. */
+const route = (extra: Partial<InboundRoute> = {}): InboundRoute => ({
+  forwarder: new EmailRoutingForwarder("treasurer@example.test"),
+  archive: null,
+  verifyBeforeDeliver: false,
+  resolveTenant: async () => h.a.tenant,
+  loadContext: async () => h.a,
+  ...extra,
+});
 const verify = (raw: Uint8Array) => verifyDkim(raw, { domain: "deunaapp.com", resolveTxt: txtFor(key) });
-const run = (m: Mail, deps: Parameters<typeof handleEmail>[3] = { verify, now: () => NOW }) => handleEmail(m.message, env(), ctxOf, deps);
+const run = (m: Mail, deps: Parameters<typeof handleEmail>[2] = { verify, now: () => NOW }, extra: Partial<InboundRoute> = {}) => handleEmail(m.message, route(extra), deps);
 const events = () => logs.map((l) => l["message"]);
 const movements = () => db.sqlite.prepare("SELECT * FROM bank_movements").all() as Array<Record<string, unknown>>;
 
@@ -225,7 +235,7 @@ describe("email handler", () => {
   it("skips parsing for oversized messages but still forwards", async () => {
     const m = mail("x");
     const big = { ...m.message, rawSize: MAX_RAW_BYTES + 1 } as unknown as ForwardableEmailMessage;
-    await handleEmail(big, env(), ctxOf, { verify, now: () => NOW });
+    await handleEmail(big, route(), { verify, now: () => NOW });
     expect(m.forward).toHaveBeenCalledTimes(1);
     expect(movements()).toHaveLength(0);
     expect(logs).toContainEqual(expect.objectContaining({ message: "deuna_mail_ignored", reason: "too_large" }));
@@ -247,7 +257,7 @@ describe("email handler", () => {
       return { messageId: "x" };
     });
     const message = { ...m.message, raw: stream, rawSize: bytes.byteLength, forward } as unknown as ForwardableEmailMessage;
-    await handleEmail(message, env(), ctxOf, { verify, now: () => NOW });
+    await handleEmail(message, route(), { verify, now: () => NOW });
     expect(order).toEqual(["read", "forward"]);
     expect(movements()).toHaveLength(1);
   });
@@ -259,7 +269,7 @@ describe("email handler", () => {
         throw new Error("stream failed");
       },
     });
-    await handleEmail({ ...m.message, raw: broken, rawSize: 10 } as unknown as ForwardableEmailMessage, env(), ctxOf, { verify, now: () => NOW });
+    await handleEmail({ ...m.message, raw: broken, rawSize: 10 } as unknown as ForwardableEmailMessage, route(), { verify, now: () => NOW });
     expect(m.forward).toHaveBeenCalledTimes(1);
     expect(events()).toContain("deuna_mail_read_failed");
   });
@@ -289,12 +299,175 @@ describe("email handler", () => {
     const fetchMock = vi.fn(async () => Response.json({ Answer: [{ type: 16, data: `"v=DKIM1; k=rsa; p=${key.publicBase64}"` }] }));
     vi.stubGlobal("fetch", fetchMock);
     try {
-      await handleEmail(mail(raw).message, env(), ctxOf, { now: () => NOW });
+      await handleEmail(mail(raw).message, route(), { now: () => NOW });
     } finally {
       vi.unstubAllGlobals();
     }
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(movements()).toHaveLength(1);
+  });
+});
+
+describe("notify, archive, process pipeline", () => {
+  const archiveOf = (bucket: FakeBucket) => new R2MailArchive(asR2(bucket), () => NOW, () => "00000000-0000-4000-8000-000000000001");
+
+  it("runs forward, then archive, then processing, each one after the previous", async () => {
+    const order: string[] = [];
+    const bucket = new FakeBucket();
+    const put = bucket.put.bind(bucket);
+    bucket.put = async (k, v) => (order.push("archive"), put(k, v));
+    const forward = vi.fn(async () => (order.push("forward"), { messageId: "x" }));
+    await run(mail(await signMessage(key, mime(), TEXT), forward), { verify: async (r) => (order.push("process"), verify(r)), now: () => NOW }, { archive: archiveOf(bucket) });
+    expect(order).toEqual(["forward", "archive", "process"]);
+  });
+
+  it("archives the raw .eml under the tenant prefix", async () => {
+    const bucket = new FakeBucket();
+    const raw = await signMessage(key, mime(), TEXT);
+    await run(mail(raw), undefined, { archive: archiveOf(bucket) });
+    expect([...bucket.objects.keys()]).toEqual([`t/${TENANT_A}/2026-11-26/00000000-0000-4000-8000-000000000001.eml`]);
+  });
+
+  it("does not archive a message that was too large to buffer, and still forwards it", async () => {
+    const bucket = new FakeBucket();
+    const m = mail("x");
+    await handleEmail({ ...m.message, rawSize: MAX_RAW_BYTES + 1 } as unknown as ForwardableEmailMessage, route({ archive: archiveOf(bucket) }), { verify, now: () => NOW });
+    expect(m.forward).toHaveBeenCalledTimes(1);
+    expect(bucket.objects.size).toBe(0);
+  });
+
+  it("an archive failure does not stop the processing, and is logged without the key", async () => {
+    const bucket = new FakeBucket();
+    bucket.put = async () => Promise.reject(new Error("r2 down"));
+    const m = mail(await signMessage(key, mime(), TEXT));
+    await run(m, undefined, { archive: archiveOf(bucket) });
+    expect(m.forward).toHaveBeenCalledTimes(1);
+    expect(movements()).toHaveLength(1);
+    expect(events()).toContain("deuna_mail_archive_failed");
+    expect(JSON.stringify(logs)).not.toContain(TENANT_A);
+  });
+
+  it("a processing failure does not undo the forward nor the archive", async () => {
+    const bucket = new FakeBucket();
+    const m = mail(await signMessage(key, mime(), TEXT));
+    await run(m, { verify: async () => Promise.reject(new Error("boom")), now: () => NOW }, { archive: archiveOf(bucket) });
+    expect(m.forward).toHaveBeenCalledTimes(1);
+    expect(bucket.objects.size).toBe(1);
+    expect(events()).toContain("deuna_mail_error");
+  });
+
+  it("a tenant lookup failure after the forward is logged and nothing is stored", async () => {
+    const m = mail(await signMessage(key, mime(), TEXT));
+    await run(m, undefined, { resolveTenant: async () => Promise.reject(new Error("db down")) });
+    expect(m.forward).toHaveBeenCalledTimes(1);
+    expect(events()).toContain("deuna_mail_error");
+    expect(movements()).toHaveLength(0);
+  });
+
+  it("still archives a DKIM-failing mail (retained and forwarded, nothing marked)", async () => {
+    const bucket = new FakeBucket();
+    const m = mail(plain(mime(), TEXT));
+    await run(m, undefined, { archive: archiveOf(bucket) });
+    expect(bucket.objects.size).toBe(1);
+    expect(movements()).toHaveLength(0);
+  });
+});
+
+describe("verification before delivery (Cloud routes)", () => {
+  const infos: Array<{ verified: boolean; unbuffered: string | null }> = [];
+  const order: string[] = [];
+  const cloud = (extra: Partial<InboundRoute> = {}): Partial<InboundRoute> => ({
+    verifyBeforeDeliver: true,
+    forwarder: { deliver: async (_m, _r, info) => void (order.push("deliver"), infos.push(info)) },
+    ...extra,
+  });
+  beforeEach(() => {
+    infos.length = 0;
+    order.length = 0;
+  });
+
+  it("verifies DKIM and From once, hands the verdict to the forwarder, and reuses it for processing", async () => {
+    let calls = 0;
+    const counting = async (r: Uint8Array) => (calls++, order.push("verify"), verify(r));
+    await run(mail(await signMessage(key, mime(), TEXT)), { verify: counting, now: () => NOW }, cloud());
+    expect(calls).toBe(1);
+    expect(order).toEqual(["verify", "deliver"]);
+    expect(infos).toEqual([{ verified: true, unbuffered: null }]);
+    expect(movements()).toHaveLength(1);
+  });
+
+  it.each([
+    ["an unsigned mail", async () => plain(mime(), TEXT)],
+    ["a spoofed From", async () => signMessage(key, mime({ from: "Fake <notificaciones@deunaapp.com.evil.test>" }), TEXT)],
+  ])("reports %s as not verified", async (_name, build) => {
+    await run(mail(await build()), undefined, cloud());
+    expect(infos).toEqual([{ verified: false, unbuffered: null }]);
+    expect(movements()).toHaveLength(0);
+  });
+
+  it("treats a failed key lookup or a throwing verifier as not verified, and still delivers", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await run(mail(await signMessage(key, mime(), TEXT)), { verify: async () => Promise.reject(new Error("dns")), now: () => NOW }, cloud());
+    await run(mail(await signMessage(key, mime(), TEXT)), { verify: async () => ({ ok: false, reason: "key_unavailable" }), now: () => NOW }, cloud());
+    expect(infos).toEqual([
+      { verified: false, unbuffered: null },
+      { verified: false, unbuffered: null },
+    ]);
+  });
+
+  it("does not verify anything before delivering when the route does not ask for it (self-host)", async () => {
+    await run(mail(await signMessage(key, mime(), TEXT)), { verify: async (r) => (order.push("verify"), verify(r)), now: () => NOW }, { forwarder: cloud().forwarder as InboundRoute["forwarder"] });
+    expect(order).toEqual(["deliver", "verify"]);
+  });
+
+  it("tells the forwarder why nothing was buffered", async () => {
+    const m = mail("x");
+    await handleEmail({ ...m.message, rawSize: MAX_RAW_BYTES + 1 } as unknown as ForwardableEmailMessage, route(cloud()), { verify, now: () => NOW });
+    const broken = new ReadableStream<Uint8Array>({
+      pull() {
+        throw new Error("stream failed");
+      },
+    });
+    await handleEmail({ ...m.message, raw: broken, rawSize: 10 } as unknown as ForwardableEmailMessage, route(cloud()), { verify, now: () => NOW });
+    expect(infos).toEqual([
+      { verified: false, unbuffered: "too_large" },
+      { verified: false, unbuffered: "unreadable" },
+    ]);
+  });
+});
+
+describe("a mail nobody received", () => {
+  const failing = { deliver: async () => Promise.reject(new Error("down")) };
+  const lost = () => logs.filter((l) => l["message"] === "deuna_mail_lost");
+
+  it("logs deuna_mail_lost at error level when delivery fails and there is no archive", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await run(mail(await signMessage(key, mime(), TEXT)), undefined, { forwarder: failing });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("deuna_mail_lost"));
+    expect(JSON.stringify(error.mock.calls)).not.toMatch(/example\.test|t\/a0000000/);
+  });
+
+  it("logs it too when delivery fails and the archive fails", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const bucket = new FakeBucket();
+    bucket.put = async () => Promise.reject(new Error("r2 down"));
+    await run(mail(await signMessage(key, mime(), TEXT)), undefined, { forwarder: failing, archive: new R2MailArchive(asR2(bucket), () => NOW, () => "x") });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("deuna_mail_lost"));
+  });
+
+  it("does not when the archive kept it, nor when delivery worked", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await run(mail(await signMessage(key, mime(), TEXT)), undefined, { forwarder: failing, archive: new R2MailArchive(asR2(new FakeBucket()), () => NOW, () => "x") });
+    await run(mail(await signMessage(key, mime({ messageId: "<other@deunaapp.com>" }), TEXT)));
+    expect(error).not.toHaveBeenCalled();
+    expect(lost()).toEqual([]);
+  });
+
+  it("logs it when the message was never buffered and delivery failed", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const m = mail("x");
+    await handleEmail({ ...m.message, rawSize: MAX_RAW_BYTES + 1 } as unknown as ForwardableEmailMessage, route({ forwarder: failing }), { verify });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("deuna_mail_lost"));
   });
 });
 

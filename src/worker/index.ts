@@ -17,20 +17,24 @@ import { adminRoute } from "./admin";
 import type { MagicLinkDeps } from "./auth/magic-link";
 import type { PasswordLogin } from "./auth/password";
 import { serveFallback, servePage, serveShell } from "./boot";
-import { buildContext } from "./context";
+import { buildContext, type RequestContext } from "./context";
 import { PlatformDb } from "./data/platform-db";
-import { handleEmail } from "./email/handler";
+import { handleEmail, type InboundRoute } from "./email/handler";
+import { resolveInboundTenant } from "./email/inbound";
 import { collectionBoard, collectionDetail, listCollections } from "./collections";
 import { serveCover } from "./covers";
-import type { CloudEnv } from "./env";
+import type { CloudEnv, MultiEnv, SingleEnv } from "./env";
 import { HttpError, enforceLimit, fail, json } from "./http";
 import { CloudflareEmailSender } from "./mail/email-sender";
+import { EmailRoutingForwarder, SendEmailNotifier } from "./mail/mail-forwarder";
 import { serveOgImage } from "./og-image";
 import { createPayment, lookup } from "./payments";
 import { toPublicConfig } from "./public-config";
+import { R2MailArchive } from "./storage/mail-archive";
 import { D1ConfigStore, type ConfigStore } from "./tenancy/config-store";
 import { tenancyState } from "./tenancy/runtime";
 import { HostTenantResolver, SingleTenantResolver, tenantNotFound, type TenantResolver } from "./tenancy/resolver";
+import type { Tenant } from "./tenancy/tenant";
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
@@ -51,21 +55,29 @@ export default {
   },
 
   /**
-   * Email Routing: Deuna "Recibiste $X" notifications (src/worker/email/handler.ts). Self-host only for now: Cloud has no
-   * per-tenant inbound routing yet, so multi mode rejects every message without reading, storing or forwarding it.
+   * Inbound Deuna mail (src/worker/email/handler.ts). Multi: ONE catch-all on INBOUND_DOMAIN delivers here and the tenant
+   * is the owner of the recipient's token; an unknown recipient is rejected before the body is read. Single: Email Routing
+   * forwards to FORWARD_TO and the seeded tenant is resolved lazily, after the forward.
    */
   async email(message, env): Promise<void> {
-    if (env.TENANCY !== "single") {
-      message.setReject("Recipient not accepted.");
-      console.log(JSON.stringify({ message: "inbound_mail_rejected", reason: "inbound_routing_not_available" }));
-      return;
+    const route =
+      env.TENANCY === "multi"
+        ? await multiInboundRoute(message, env)
+        : env.TENANCY === "single"
+          ? singleInboundRoute(env)
+          : reject(message, "inbound_mail_not_configured", "error");
+    if (route) await handleEmail(message, route);
+  },
+
+  /** Daily cron (triggers.crons in the Cloud config): deletes archived mail past the 30-day retention. The scheduled time is the clock. */
+  async scheduled(controller, env): Promise<void> {
+    if (!env.MAIL_ARCHIVE) return;
+    try {
+      const deleted = await new R2MailArchive(env.MAIL_ARCHIVE, () => new Date(controller.scheduledTime), () => crypto.randomUUID()).purgeExpired();
+      console.log(JSON.stringify({ message: "mail_archive_purged", deleted }));
+    } catch (e) {
+      console.error(JSON.stringify({ message: "mail_archive_purge_failed", error: e instanceof Error ? e.message : String(e) }));
     }
-    // The tenant is resolved lazily, after the forward, so a database problem never stops the mail reaching the treasurer.
-    await handleEmail(message, env, async () => {
-      const tenant = await resolverFor(env, null).resolve("");
-      const config = tenant ? await configStoreFor(env).load(tenant) : null;
-      return tenant && config ? buildContext(tenant, { db: env.DB, files: env.RECEIPTS }, config) : null;
-    });
   },
 } satisfies ExportedHandler<CloudEnv>;
 
@@ -103,9 +115,8 @@ function passwordLoginFor(env: CloudEnv): PasswordLogin | null {
 function magicLinkFor(env: CloudEnv, ec: ExecutionContext): MagicLinkDeps | null {
   if (env.TENANCY !== "multi") return null;
   try {
-    if (!env.SEND_EMAIL) throw new Error("SEND_EMAIL binding missing");
     return {
-      sender: new CloudflareEmailSender(env.SEND_EMAIL, `no-reply@${env.ROOT_DOMAIN}`),
+      sender: cloudSenderFor(env),
       members: new PlatformDb(env.DB),
       limiter: env.LOGIN_LIMITER,
       rootDomain: env.ROOT_DOMAIN,
@@ -115,6 +126,68 @@ function magicLinkFor(env: CloudEnv, ec: ExecutionContext): MagicLinkDeps | null
     console.error(JSON.stringify({ message: "magic_link_not_configured" }));
     return null;
   }
+}
+
+function reject(message: ForwardableEmailMessage, event: string, level: "log" | "error", fields: Record<string, string> = {}): null {
+  message.setReject("Recipient not accepted.");
+  console[level](JSON.stringify({ message: event, ...fields }));
+  return null;
+}
+
+/** Cloud sender of platform mail: `no-reply@<ROOT_DOMAIN>` through the send_email binding. Throws when it is not configured. */
+function cloudSenderFor(env: MultiEnv): CloudflareEmailSender {
+  if (!env.SEND_EMAIL) throw new Error("SEND_EMAIL binding missing");
+  return new CloudflareEmailSender(env.SEND_EMAIL, `no-reply@${env.ROOT_DOMAIN}`);
+}
+
+/**
+ * Multi: everything that can refuse the message happens here, BEFORE its body is read, and fails closed with setReject
+ * (a bounce is better than a Deuna payment notice that silently vanished). Logs never carry the address.
+ */
+async function multiInboundRoute(message: ForwardableEmailMessage, env: MultiEnv): Promise<InboundRoute | null> {
+  const platform = new PlatformDb(env.DB);
+  let tenant: Tenant | null;
+  try {
+    tenant = await resolveInboundTenant(message.to, env.INBOUND_DOMAIN, platform);
+  } catch {
+    return reject(message, "inbound_mail_lookup_failed", "error");
+  }
+  if (!tenant) return reject(message, "inbound_mail_rejected", "log", { reason: "unknown_recipient" });
+  let forwarder: SendEmailNotifier;
+  try {
+    forwarder = new SendEmailNotifier(cloudSenderFor(env), platform, tenant.id, env.LOOKUP_LIMITER);
+  } catch {
+    return reject(message, "inbound_mail_not_configured", "error");
+  }
+  // Nobody to notify means the treasurer would never hear of this mail: bounce it now, while rejecting is still possible.
+  try {
+    if ((await platform.listNotificationRecipients(tenant.id)).length === 0) return reject(message, "inbound_mail_no_recipients", "error");
+  } catch {
+    return reject(message, "inbound_mail_lookup_failed", "error");
+  }
+  const found = tenant;
+  return {
+    forwarder,
+    archive: env.MAIL_ARCHIVE ? new R2MailArchive(env.MAIL_ARCHIVE, () => new Date(), () => crypto.randomUUID()) : null,
+    verifyBeforeDeliver: true,
+    resolveTenant: async () => found,
+    loadContext: (t) => loadTenantContext(env, t),
+  };
+}
+
+function singleInboundRoute(env: SingleEnv): InboundRoute {
+  return {
+    forwarder: new EmailRoutingForwarder(env.FORWARD_TO),
+    archive: env.MAIL_ARCHIVE ? new R2MailArchive(env.MAIL_ARCHIVE, () => new Date(), () => crypto.randomUUID()) : null,
+    verifyBeforeDeliver: false,
+    resolveTenant: () => resolverFor(env, null).resolve(""),
+    loadContext: (t) => loadTenantContext(env, t),
+  };
+}
+
+async function loadTenantContext(env: CloudEnv, tenant: Tenant): Promise<RequestContext | null> {
+  const config = await configStoreFor(env).load(tenant);
+  return config ? buildContext(tenant, { db: env.DB, files: env.RECEIPTS }, config) : null;
 }
 
 /** Multi: the tenant's validated `config_json` (cached per isolate). Single: the bundled config. */
