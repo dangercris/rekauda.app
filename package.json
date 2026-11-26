@@ -4,15 +4,19 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev:api": "node scripts/ensure-config.mjs && wrangler dev --port 8799",
+    "dev:api": "node scripts/cloud-guard.mjs --refuse-branch",
     "dev:web": "node scripts/ensure-config.mjs && vite",
     "build": "node scripts/ensure-config.mjs && vite build",
-    "deploy": "node scripts/ensure-config.mjs && wrangler d1 migrations apply DB --remote && vite build && wrangler deploy",
-    "types": "node scripts/ensure-config.mjs && wrangler types",
+    "deploy": "node scripts/cloud-guard.mjs --refuse-branch",
+    "types": "node scripts/cloud-guard.mjs --refuse-branch",
     "typecheck": "node scripts/ensure-config.mjs && tsc -p src/worker/tsconfig.json --noEmit && tsc -p src/client/tsconfig.json --noEmit",
     "test": "node scripts/ensure-config.mjs && vitest run",
-    "db:migrate:local": "node scripts/ensure-config.mjs && wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "node scripts/ensure-config.mjs && wrangler d1 migrations apply DB --remote"
+    "db:migrate:local": "node scripts/cloud-guard.mjs --refuse-branch",
+    "db:migrate:remote": "node scripts/cloud-guard.mjs --refuse-branch",
+    "cloud:guard": "node scripts/ensure-config.mjs && node scripts/cloud-guard.mjs --local",
+    "cloud:migrate:local": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs d1 migrations apply DB",
+    "cloud:dev": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs dev --port 8799",
+    "cloud:types": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs types"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^8.0.0",

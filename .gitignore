@@ -10,3 +10,5 @@ rekauda.config.ts
 wrangler.jsonc
 redirect/wrangler.jsonc
 public/deuna-qr.png
+wrangler.cloud.jsonc
+.pilot-resources.json
