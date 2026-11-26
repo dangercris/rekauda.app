@@ -1,0 +1,68 @@
+{
+  // Rekauda Cloud (multi-tenant) config. Copy to wrangler.cloud.jsonc (gitignored; scripts/ensure-config.mjs does it).
+  // Every cloud script runs scripts/cloud-guard.mjs first, which refuses any resource shared with the pilot.
+  // Phase 1 is local only: nothing here is ever deployed or migrated remotely from this branch.
+  // Cloud scripts reach wrangler only through scripts/cloud-wrangler.mjs, which fixes this config and a separate
+  // local state dir (.wrangler/state-cloud) and rejects --remote, --config, --env and --persist-to.
+  //
+  // The guard learns the pilot's real names, ids and domains ONLY from local, gitignored files, never from tracked code:
+  //   - wrangler.jsonc (the pilot config), and
+  //   - .pilot-resources.json, optional, for anything wrangler.jsonc does not list. Shape, with invented values:
+  //     { "names": ["pilot-worker", "pilot-db", "pilot-bucket"], "ids": ["<database or account id>"], "domains": ["pilot.example.org"] }
+  // Any string in this file equal to one of those values is refused (case-insensitive). With no real pilot data
+  // the guard warns and local checks of names and ids cannot run. Remote is refused unconditionally.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "rekauda-cloud-example",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-11-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+
+  // Add routes only on a separate sandbox domain, never on the pilot domain. A wildcard needs vars.SANDBOX = "true":
+  // "routes": [{ "pattern": "*.sandbox.example.net/*", "zone_name": "sandbox.example.net" }],
+
+  "vars": {
+    "TENANCY": "multi",
+    "ROOT_DOMAIN": "localhost",
+    "INBOUND_DOMAIN": "in.localhost"
+  },
+
+  "rules": [{ "type": "Data", "globs": ["**/*.ttf"], "fallthrough": true }],
+
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/r/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rekauda-cloud-example-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations-cloud"
+    }
+  ],
+
+  "r2_buckets": [
+    { "binding": "RECEIPTS", "bucket_name": "rekauda-cloud-example-files" },
+    { "binding": "MAIL_ARCHIVE", "bucket_name": "rekauda-cloud-example-mail" }
+  ],
+
+  "images": { "binding": "IMAGES" },
+
+  // Placeholder: the real send_email shape is verified in the sandbox (slice 4).
+  "send_email": [{ "name": "SEND_EMAIL" }],
+
+  // namespace_id values differ from wrangler.example.jsonc on purpose.
+  "ratelimits": [
+    { "name": "SUBMIT_LIMITER", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "LOGIN_LIMITER", "namespace_id": "2002", "simple": { "limit": 5, "period": 60 } },
+    { "name": "LOOKUP_LIMITER", "namespace_id": "2003", "simple": { "limit": 20, "period": 60 } }
+  ],
+
+  "observability": { "enabled": true }
+}

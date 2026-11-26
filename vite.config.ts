@@ -104,7 +104,7 @@ export default defineConfig(({ command }) => ({
           name: "worker",
           alias: testAlias,
           environment: "node",
-          include: ["src/worker/**/*.test.ts", "src/shared/**/*.test.ts"],
+          include: ["src/worker/**/*.test.ts", "src/shared/**/*.test.ts", "scripts/**/*.test.ts"],
         },
       },
     ],
