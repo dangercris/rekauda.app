@@ -81,7 +81,7 @@ describe("parseHost", () => {
 describe("isValidSlug", () => {
   it("accepts DNS-safe lowercase slugs", () => {
     expect(isValidSlug("curso-a")).toBe(true);
-    expect(isValidSlug("1ro-bgu-a")).toBe(true);
+    expect(isValidSlug("club-azul-2")).toBe(true);
     expect(isValidSlug("abc")).toBe(true);
     expect(isValidSlug("a".repeat(40))).toBe(true);
   });

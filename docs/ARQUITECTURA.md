@@ -68,14 +68,15 @@ La ruta pública de portadas solo sirve claves que existan como `cover_key` de u
 
 ## Enrutamiento
 
-El Worker corre primero solo para `/api/*` y `/r/*` (`assets.run_worker_first` en `wrangler.jsonc`). Todo lo demás lo sirven los assets, con `html_handling: "drop-trailing-slash"` y `not_found_handling: "single-page-application"`.
+El Worker corre primero para todas las rutas excepto `/assets/*` (archivos con hash) y `/icon.svg` (`assets.run_worker_first: ["/*", "!/assets/*", "!/icon.svg"]` en `wrangler.jsonc`). Así `/`, `/admin` y las rutas de respaldo de la SPA reciben el JSON de arranque en modo `single`. Los assets estáticos los sirve Cloudflare, con `html_handling: "drop-trailing-slash"` y `not_found_handling: "single-page-application"`.
 
 | Ruta | Quién responde |
 | --- | --- |
 | `/api/*` | Worker (`route()` en `src/worker/index.ts`) |
 | `/r/<enlace>` | Worker: toma el HTML de la app y le inyecta etiquetas de vista previa |
-| `/admin` | Assets (`admin.html`) |
-| Cualquier otra ruta no encontrada | Assets: cae en `index.html` (SPA) |
+| `/` y `/admin` | Worker: sirve el HTML de la app con el JSON de arranque de la configuración |
+| Cualquier otra ruta no encontrada | Worker: responde con `index.html` (SPA) más el JSON de arranque |
+| `/assets/*`, `/icon.svg` | Assets estáticos |
 
 Como una ruta desconocida como `/admin/algo` cae en la app pública, el panel navega solo con el hash: `#resumen`, `#pagos`, `#pagos/<estado|todos>`, `#pago/<id>`, `#eventos`, `#evento/nuevo`, `#evento/<id>` y `#movimientos` (definidas en `src/client/admin/routes.ts`).
 

@@ -145,4 +145,46 @@ export class PlatformDb {
     if (!complete) throw new Error("self-host provisioning incomplete");
     return true;
   }
+
+  /**
+   * Inserts a cloud tenant, its platform subdomain, its owner (an existing person is reused) and the owner membership
+   * in ONE batch. Returns the tenant, or null when the slug or hostname is taken (nothing is written then).
+   */
+  async createCloudTenant(row: {
+    id: string;
+    slug: string;
+    hostname: string;
+    configJson: string;
+    ownerEmail: string;
+    ownerId: string;
+    nowIso: string;
+  }): Promise<Tenant | null> {
+    const taken = await this.db
+      .prepare("SELECT 1 AS n FROM tenants WHERE slug = ?1 UNION ALL SELECT 1 FROM tenant_domains WHERE hostname = ?2")
+      .bind(row.slug, row.hostname)
+      .first();
+    if (taken) return null;
+    const prefix = `t/${row.id}/`;
+    await this.db.batch([
+      this.db
+        .prepare(
+          `INSERT INTO tenants (id, slug, config_json, r2_prefix, source, created_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, 'cloud', ?5, ?5)`,
+        )
+        .bind(row.id, row.slug, row.configJson, prefix, row.nowIso),
+      this.db
+        .prepare("INSERT INTO tenant_domains (hostname, tenant_id, kind, created_at) VALUES (?1, ?2, 'subdomain', ?3)")
+        .bind(row.hostname, row.id, row.nowIso),
+      this.db
+        .prepare("INSERT INTO users (id, email, kind, created_at) VALUES (?1, ?2, 'person', ?3) ON CONFLICT DO NOTHING")
+        .bind(row.ownerId, row.ownerEmail, row.nowIso),
+      this.db
+        .prepare(
+          `INSERT INTO memberships (tenant_id, user_id, role, created_at)
+           SELECT ?1, id, 'owner', ?3 FROM users WHERE email = ?2 AND kind = 'person'`,
+        )
+        .bind(row.id, row.ownerEmail, row.nowIso),
+    ]);
+    return Object.freeze({ id: row.id, slug: row.slug, r2Prefix: prefix, source: "cloud" as const });
+  }
 }
