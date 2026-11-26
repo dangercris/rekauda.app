@@ -60,13 +60,8 @@ function seedCollection(sqlite: DatabaseSync): void {
     .run(SEED_COLLECTION_ID);
 }
 
-export function createTestDb(): TestDb {
-  const sqlite = new DatabaseSync(":memory:");
-  const dir = new URL("../../../migrations/", import.meta.url);
-  for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
-    sqlite.exec(readFileSync(new URL(file, dir), "utf8"));
-  }
-  seedCollection(sqlite);
+/** Wraps an open node:sqlite database in the D1-shaped surface the Worker code uses. */
+export function wrapSqlite(sqlite: DatabaseSync): TestDb {
   return {
     sqlite,
     prepare: (sql) => new FakeStatement(sqlite, sql),
@@ -82,6 +77,16 @@ export function createTestDb(): TestDb {
       }
     },
   };
+}
+
+export function createTestDb(): TestDb {
+  const sqlite = new DatabaseSync(":memory:");
+  const dir = new URL("../../../migrations/", import.meta.url);
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
+    sqlite.exec(readFileSync(new URL(file, dir), "utf8"));
+  }
+  seedCollection(sqlite);
+  return wrapSqlite(sqlite);
 }
 
 /** The Worker types its binding as D1Database; the double only covers the used surface. */

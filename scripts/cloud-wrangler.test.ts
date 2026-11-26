@@ -3,58 +3,63 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { fakeCheckout } from "./lib/fake-checkout";
+// @ts-expect-error plain .mjs module without types
+import { runCloudWrangler } from "./lib/cloud-wrangler-core.mjs";
 
 const roots: string[] = [];
 afterAll(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
 
-// The stub replaces wrangler: it prints its argv and cwd and exits with STUB_EXIT. Real wrangler is never run.
-const STUB = `console.log("STUB " + JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() })); process.exit(Number(process.env.STUB_EXIT ?? 0));`;
+interface Call {
+  bin: string;
+  argv: string[];
+  cwd: string;
+}
 
-function setup(files: Record<string, string> = {}): { root: string; wrangler: (...args: string[]) => ReturnType<typeof spawnSync> } {
+/** Runs the wrapper against a throwaway checkout with a fake spawn: real wrangler is never reachable. */
+function setup(files: Record<string, string> = {}): { root: string; calls: Call[]; errors: string[]; run: (...args: string[]) => number } {
   const root = fakeCheckout("cloud-wrangler", { "wrangler.cloud.jsonc": readFileSync(new URL("../wrangler.cloud.example.jsonc", import.meta.url), "utf8"), ...files });
   roots.push(root);
-  writeFileSync(join(root, "stub.mjs"), STUB);
-  const wrangler = (...args: string[]) =>
-    spawnSync(process.execPath, [join(root, "scripts/cloud-wrangler.mjs"), ...args], {
-      encoding: "utf8",
-      env: { ...process.env, CLOUD_WRANGLER_BIN: join(root, "stub.mjs"), STUB_EXIT: process.env.STUB_EXIT ?? "0" },
-    });
-  return { root, wrangler };
+  const calls: Call[] = [];
+  const errors: string[] = [];
+  const spawn = (bin: string, argv: string[], options: { cwd: string }) => {
+    calls.push({ bin, argv, cwd: options.cwd });
+    return { status: Number(process.env.STUB_EXIT ?? 0) };
+  };
+  const log = { error: (m: string) => errors.push(String(m)), warn: () => undefined };
+  return { root, calls, errors, run: (...args) => runCloudWrangler(args, { root: root + "/", bin: "fake-wrangler", spawn, log }) as number };
 }
-const stubCall = (stdout: string): { argv: string[]; cwd: string } => JSON.parse(stdout.split("STUB ")[1] ?? "null");
-const text = (r: { stdout?: unknown; stderr?: unknown }) => String(r.stdout) + String(r.stderr);
 const FIXED = ["--config", "wrangler.cloud.jsonc", "--persist-to", ".wrangler/state-cloud"];
 
 describe("cloud-wrangler: what it runs", () => {
   it("runs dev with the fixed cloud config and its own persistence dir, from the repo root", () => {
-    const { root, wrangler } = setup();
-    const result = wrangler("dev", "--port", "8799");
-    expect(result.status).toBe(0);
-    const call = stubCall(String(result.stdout));
-    expect(call.argv).toEqual(["dev", "--port", "8799", ...FIXED]);
-    expect(call.cwd.endsWith(root.split("/").pop()!)).toBe(true);
+    const { root, calls, run } = setup();
+    expect(run("dev", "--port", "8799")).toBe(0);
+    expect(calls).toEqual([{ bin: "fake-wrangler", argv: ["dev", "--port", "8799", ...FIXED], cwd: root + "/" }]);
   });
 
   it("forces --local for d1 commands", () => {
-    const { wrangler } = setup();
-    expect(stubCall(String(wrangler("d1", "migrations", "apply", "DB").stdout)).argv).toEqual(["d1", "migrations", "apply", "DB", "--local", ...FIXED]);
+    const { calls, run } = setup();
+    run("d1", "migrations", "apply", "DB");
+    expect(calls[0]?.argv).toEqual(["d1", "migrations", "apply", "DB", "--local", ...FIXED]);
   });
 
   it("does not duplicate --local", () => {
-    const { wrangler } = setup();
-    expect(stubCall(String(wrangler("d1", "execute", "DB", "--local").stdout)).argv).toEqual(["d1", "execute", "DB", "--local", ...FIXED]);
+    const { calls, run } = setup();
+    run("d1", "execute", "DB", "--local");
+    expect(calls[0]?.argv).toEqual(["d1", "execute", "DB", "--local", ...FIXED]);
   });
 
   it("runs types with the cloud config but without a persistence dir", () => {
-    const { wrangler } = setup();
-    expect(stubCall(String(wrangler("types").stdout)).argv).toEqual(["types", "--config", "wrangler.cloud.jsonc"]);
+    const { calls, run } = setup();
+    run("types");
+    expect(calls[0]?.argv).toEqual(["types", "--config", "wrangler.cloud.jsonc"]);
   });
 
   it("propagates the exit status of wrangler", () => {
-    const { wrangler } = setup();
+    const { run } = setup();
     process.env.STUB_EXIT = "3";
     try {
-      expect(wrangler("dev").status).toBe(3);
+      expect(run("dev")).toBe(3);
     } finally {
       delete process.env.STUB_EXIT;
     }
@@ -72,32 +77,64 @@ describe("cloud-wrangler: what it refuses (wrangler is never reached)", () => {
     ["-e", "prod"],
     ["--env", "prod"],
     ["--env=prod"],
+    ["--env-file", ".env.prod"],
+    ["--env-file=.env.prod"],
     ["--persist-to", "elsewhere"],
     ["--persist-to=elsewhere"],
     ["--local=false"],
   ])("rejects the pass-through flag %j", (...flag) => {
-    const { wrangler } = setup();
-    const result = wrangler("dev", ...flag);
-    expect(result.status).toBe(1);
-    expect(text(result)).toContain("REFUSED");
-    expect(text(result)).not.toContain("STUB");
+    const { calls, errors, run } = setup();
+    expect(run("dev", ...flag)).toBe(1);
+    expect(errors.join("\n")).toContain("REFUSED");
+    expect(calls).toEqual([]);
   });
 
   it.each([["deploy"], ["secret", "put", "X"], ["r2", "object", "get", "a/b"], ["versions", "upload"], ["delete"], []])("rejects the subcommand %j", (...args) => {
-    const { wrangler } = setup();
-    const result = wrangler(...args);
-    expect(result.status).toBe(1);
-    expect(text(result)).not.toContain("STUB");
+    const { calls, run } = setup();
+    expect(run(...args)).toBe(1);
+    expect(calls).toEqual([]);
+  });
+
+  it.each([["d1", "create", "x"], ["d1", "delete", "DB"], ["d1", "export", "DB"], ["d1", "time-travel", "restore", "DB"], ["d1"]])("rejects the d1 action %j", (...args) => {
+    const { calls, run } = setup();
+    expect(run(...args)).toBe(1);
+    expect(calls).toEqual([]);
+  });
+
+  it.each([["d1", "execute", "DB", "--file", "x.sql"], ["d1", "migrations", "list", "DB"]])("allows the d1 action %j", (...args) => {
+    const { calls, run } = setup();
+    expect(run(...args)).toBe(0);
+    expect(calls).toHaveLength(1);
   });
 
   it("blocks when the guard finds a pilot resource in the cloud config", () => {
-    const { wrangler } = setup({
+    const { calls, errors, run } = setup({
       "wrangler.jsonc": '{ "name": "fixture-pilot-worker" }',
       "wrangler.cloud.jsonc": '{ "name": "fixture-pilot-worker", "d1_databases": [{ "migrations_dir": "migrations-cloud" }] }',
     });
-    const result = wrangler("dev");
-    expect(result.status).toBe(1);
-    expect(text(result)).toContain("REFUSED name:");
-    expect(text(result)).not.toContain("STUB");
+    expect(run("dev")).toBe(1);
+    expect(errors.join("\n")).toContain("REFUSED name:");
+    expect(calls).toEqual([]);
   });
 });
+
+describe("cloud-wrangler CLI: the binary cannot be redirected from the environment", () => {
+  it("ignores CLOUD_WRANGLER_BIN even with VITEST set and always uses the checkout wrangler", () => {
+    const root = fakeCheckout("cloud-wrangler-cli", { "wrangler.cloud.jsonc": readFileSync(new URL("../wrangler.cloud.example.jsonc", import.meta.url), "utf8") });
+    roots.push(root);
+    writeFileSync(join(root, "stub.mjs"), 'console.log("STUB-RAN");');
+    const result = spawnSync(process.execPath, [join(root, "scripts/cloud-wrangler.mjs"), "dev"], {
+      encoding: "utf8",
+      env: { ...process.env, CLOUD_WRANGLER_BIN: join(root, "stub.mjs"), VITEST: "1" },
+    });
+    expect(String(result.stdout) + String(result.stderr)).not.toContain("STUB-RAN");
+    expect(result.status).not.toBe(0);
+  });
+
+  it("no longer reads CLOUD_WRANGLER_BIN anywhere in the scripts", () => {
+    for (const file of ["cloud-wrangler.mjs", "lib/cloud-wrangler-core.mjs"]) {
+      expect(readFileSync(new URL(file, import.meta.url), "utf8"), file).not.toContain("CLOUD_WRANGLER_BIN");
+    }
+  });
+});
+

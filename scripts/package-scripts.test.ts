@@ -12,19 +12,23 @@ const firstRealStep = (command: string): string | undefined => steps(command).fi
 
 describe("cloud:* scripts", () => {
   it("defines the expected cloud scripts", () => {
-    expect(cloudNames.sort()).toEqual(["cloud:dev", "cloud:guard", "cloud:migrate:local", "cloud:types"]);
+    expect(cloudNames.sort()).toEqual(["cloud:dev", "cloud:guard", "cloud:migrate:local", "cloud:seed:local", "cloud:types"]);
   });
 
   it("cloud:guard runs the guard in local mode", () => {
     expect(firstRealStep(scripts["cloud:guard"]!)).toBe("node scripts/cloud-guard.mjs --local");
   });
 
-  it.each(["cloud:migrate:local", "cloud:dev", "cloud:types"])("%s goes through the wrapper, which runs the guard", (name) => {
+  it.each(["cloud:migrate:local", "cloud:seed:local", "cloud:dev", "cloud:types"])("%s goes through the wrapper, which runs the guard", (name) => {
     expect(firstRealStep(scripts[name]!)).toMatch(/^node scripts\/cloud-wrangler\.mjs (d1|dev|types)\b/);
   });
 
   it("applies migrations through the wrapper, which forces the local D1", () => {
     expect(scripts["cloud:migrate:local"]).toContain("cloud-wrangler.mjs d1 migrations apply DB");
+  });
+
+  it("seeds the local D1 from the fictional seed file through the wrapper", () => {
+    expect(scripts["cloud:seed:local"]).toContain("cloud-wrangler.mjs d1 execute DB --file scripts/cloud-seed.local.sql");
   });
 
   it.each(cloudNames)("%s hardcodes no wrangler flags that the wrapper owns", (name) => {

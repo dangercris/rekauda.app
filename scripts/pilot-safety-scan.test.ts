@@ -13,12 +13,13 @@ const sources = files(dir)
   .map((f) => ({ name: f.slice(dir.length), text: readFileSync(f, "utf8") }));
 
 // The only files allowed to mention the flag: the guard and the wrapper, which exist to REJECT it.
-const MENTIONS_REMOTE_FLAG = ["cloud-guard.mjs", "cloud-wrangler.mjs"];
+const WRAPPER_FILES = ["cloud-wrangler.mjs", "lib/cloud-wrangler-core.mjs"];
+const MENTIONS_REMOTE_FLAG = ["cloud-guard.mjs", ...WRAPPER_FILES];
 const INVOKES_WRANGLER = /bin\/wrangler|\bwrangler\s+(d1|dev|deploy|r2|secret|types|versions|kv|delete)\b/;
 
 describe("scripts/ safety scan", () => {
   it("finds the scripts to scan", () => {
-    expect(sources.map((s) => s.name)).toEqual(expect.arrayContaining(["cloud-wrangler.mjs", "pending.sh", "review.sh"]));
+    expect(sources.map((s) => s.name)).toEqual(expect.arrayContaining(["cloud-wrangler.mjs", "lib/cloud-wrangler-core.mjs", "pending.sh", "review.sh"]));
   });
 
   it.each(sources)("$name never uses --remote outside the guard and the wrapper", ({ name, text }) => {
@@ -26,7 +27,7 @@ describe("scripts/ safety scan", () => {
   });
 
   it.each(sources)("$name invokes wrangler only through cloud-wrangler.mjs", ({ name, text }) => {
-    if (name !== "cloud-wrangler.mjs") expect(INVOKES_WRANGLER.test(text)).toBe(false);
+    if (!WRAPPER_FILES.includes(name)) expect(INVOKES_WRANGLER.test(text)).toBe(false);
   });
 });
 

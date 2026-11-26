@@ -15,6 +15,7 @@
     "db:migrate:remote": "node scripts/cloud-guard.mjs --refuse-branch",
     "cloud:guard": "node scripts/ensure-config.mjs && node scripts/cloud-guard.mjs --local",
     "cloud:migrate:local": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs d1 migrations apply DB",
+    "cloud:seed:local": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs d1 execute DB --file scripts/cloud-seed.local.sql",
     "cloud:dev": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs dev --port 8799",
     "cloud:types": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs types"
   },
