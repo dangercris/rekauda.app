@@ -22,11 +22,13 @@ CREATE TABLE tenants (
   CHECK (source <> 'cloud' OR r2_prefix = 't/' || id || '/')
 );
 
--- Hostnames are stored lowercase without port.
+-- Hostnames are stored lowercase without port. verified_at is set when the platform has confirmed control of the name.
+-- Platform-created subdomains (kind subdomain) resolve without it. Custom domains resolve only once verified_at is set.
 CREATE TABLE tenant_domains (
   hostname TEXT NOT NULL PRIMARY KEY CHECK (hostname = lower(hostname)),
   tenant_id TEXT NOT NULL REFERENCES tenants (id),
   kind TEXT NOT NULL DEFAULT 'subdomain' CHECK (kind IN ('subdomain', 'custom')),
+  verified_at TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX idx_tenant_domains_tenant ON tenant_domains (tenant_id);
