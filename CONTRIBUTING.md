@@ -13,7 +13,7 @@ pnpm install
 Crea `.dev.vars` con valores de prueba (el archivo está en `.gitignore`; nunca uses secretos reales):
 
 ```bash
-printf 'ADMIN_PASSWORD=clave-local\nSESSION_SECRET=%s\nFORWARD_TO=tesoreria@ejemplo.com\n' "$(openssl rand -hex 32)" > .dev.vars
+printf 'ADMIN_PASSWORD=clave-local\nFORWARD_TO=tesoreria@ejemplo.com\n' > .dev.vars
 ```
 
 ```bash
@@ -29,6 +29,8 @@ pnpm dev:api
 ```bash
 pnpm dev:web
 ```
+
+El panel de administración usa una cookie `__Host-` con `Secure`: Safari no la acepta sobre `http://localhost`, así que usa Chrome o Firefox para el panel en local.
 
 El Worker queda en `http://localhost:8799` y Vite redirige `/api` hacia él. Con `pnpm dev:web` también puedes abrir `/gallery`, una guía de estilos solo para desarrollo que no se incluye en el build.
 

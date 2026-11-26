@@ -76,9 +76,24 @@ export interface ConfigResponse {
   auth: { mode: "password" | "magic_link" };
 }
 
-/** Generic success body (login, logout, session). 401 means signed out. */
+/** Generic success body (login, logout). 401 means signed out. */
 export interface OkResponse {
   ok: true;
+}
+
+/** Roles a member can hold in one tenant. Both may review payments, including `pagado` and `anulado`. */
+export const ADMIN_ROLES = ["owner", "co_treasurer"] as const;
+export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+/** GET /api/admin/session: 200 with the caller's role in THIS tenant, 401 without a valid session for it. */
+export interface AdminSessionResponse {
+  ok: true;
+  role: AdminRole;
+}
+
+/** POST /api/admin/login (self-host only: 404 elsewhere, 503 `admin_disabled` without ADMIN_PASSWORD, 429 when rate limited). */
+export interface AdminLoginInput {
+  password: string;
 }
 
 /** Item of GET /api/collections (archived collections are excluded). */
@@ -281,6 +296,7 @@ export interface AdminPayment {
   status: PaymentStatus;
   reviewNote: string | null;
   verification: string | null;
+  /** Opaque id of the member who reviewed it (no name or email), or `deuna` for the email automation. */
   reviewedBy: string | null;
   reviewedAt: string | null;
   paidAt: string | null;
@@ -314,7 +330,8 @@ export interface AdminStatusResponse {
 
 /**
  * Receipt file: GET /api/admin/receipts/:paymentId (images inline, PDFs as attachment).
- * Session: POST /api/admin/login {password}, POST /api/admin/logout, GET /api/admin/session.
+ * Session: POST /api/admin/login {password} (self-host), POST /api/admin/logout, GET /api/admin/session.
+ * The session is an opaque `__Host-rk_session` cookie (host-only, HttpOnly, Secure, SameSite=Strict, 7 days) bound to one tenant.
  */
 
 // ---------------------------------------------------------------- bank movements (Deuna emails)

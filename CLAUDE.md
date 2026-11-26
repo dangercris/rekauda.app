@@ -29,7 +29,7 @@ pnpm run deploy            # remote migrations -> build -> wrangler deploy
 
 - Use `pnpm run deploy`, never `pnpm deploy` (a pnpm builtin).
 - `typecheck`, `test` and `build` must all pass before you report work as done.
-- `.dev.vars` (gitignored) holds local `ADMIN_PASSWORD`, `SESSION_SECRET`, `FORWARD_TO`. Never put real secrets there, never print or log secret values.
+- `.dev.vars` (gitignored) holds local `ADMIN_PASSWORD`, `FORWARD_TO`. Never put real secrets there, never print or log secret values.
 
 ## Per-instance configuration (critical)
 

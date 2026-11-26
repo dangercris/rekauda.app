@@ -60,14 +60,14 @@
   ],
 
   // Secrets (never in this file), set with `wrangler secret put <NAME>`:
-  //   ADMIN_PASSWORD, SESSION_SECRET: admin login and session signing.
+  //   ADMIN_PASSWORD: admin login (the session itself is an opaque token stored in D1, so there is no signing secret).
   //   FORWARD_TO: the treasurer's real inbox (must be a verified Email Routing destination address).
   //               The email() handler forwards EVERY inbound message there first (src/worker/email/handler.ts).
   // Inbound Deuna notifications: Cloudflare Email Routing must route the secret address on your domain
   // (Email > Email Routing > Routing rules > Custom address > "Send to a Worker" > rekauda),
   // and the treasurer sets that address as the email of the Deuna account.
   // Local dev reads these from .dev.vars; `secrets.required` also drives the generated Env types (pnpm types).
-  "secrets": { "required": ["ADMIN_PASSWORD", "SESSION_SECRET", "FORWARD_TO"] },
+  "secrets": { "required": ["ADMIN_PASSWORD", "FORWARD_TO"] },
 
   "observability": {
     "enabled": true,

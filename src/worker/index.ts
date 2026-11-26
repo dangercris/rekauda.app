@@ -4,7 +4,7 @@
  *
  * Public API:  GET /api/config (the tenant's public config, also inlined as boot JSON in the HTML), GET /api/assets/deuna-qr.<ext>, GET /api/collections[/:slug[/board]], POST /api/payments, GET /api/lookup/:code,
  *              GET /api/covers/<id>/<hash>.<ext>, GET /api/og/<slug>.jpg (link-preview card)
- * Admin API:   /api/admin/* (self-host: password login -> signed HttpOnly cookie; Cloud: disabled until D1 sessions)
+ * Admin API:   /api/admin/* (D1 sessions in a host-only cookie; self-host signs in with ADMIN_PASSWORD, Cloud with magic links)
  * Email:       email() handler for Deuna notifications (Email Routing), see src/worker/email/
  * Tenancy:     this file is the composition root. It resolves the tenant (Host header in multi mode, the seeded tenant in
  *              single mode) and hands handlers a RequestContext; handlers never see env.DB or env.RECEIPTS.
@@ -14,7 +14,7 @@
  */
 import { serveDeunaQr } from "./assets";
 import { adminRoute } from "./admin";
-import type { AdminAuthConfig } from "./auth";
+import type { PasswordLogin } from "./auth/password";
 import { serveFallback, servePage, serveShell } from "./boot";
 import { buildContext } from "./context";
 import { PlatformDb } from "./data/platform-db";
@@ -89,10 +89,9 @@ function resolverFor(env: CloudEnv, request: Request | null): TenantResolver {
   throw new Error("TENANCY must be multi or single");
 }
 
-/** Legacy shared-password admin exists only in single mode: its cookie is not tenant-bound, so Cloud must never use it. */
-function adminAuth(env: CloudEnv): AdminAuthConfig | null {
-  if (env.TENANCY !== "single" || !env.ADMIN_PASSWORD || !env.SESSION_SECRET) return null;
-  return { adminPassword: env.ADMIN_PASSWORD, sessionSecret: env.SESSION_SECRET, loginLimiter: env.LOGIN_LIMITER };
+/** The self-host password provider exists only in single mode. Cloud has no password: admin there needs a magic-link session. */
+function passwordLoginFor(env: CloudEnv): PasswordLogin | null {
+  return env.TENANCY === "single" && env.ADMIN_PASSWORD ? { adminPassword: env.ADMIN_PASSWORD, limiter: env.LOGIN_LIMITER } : null;
 }
 
 /** Multi: the tenant's validated `config_json` (cached per isolate). Single: the bundled config. */
@@ -137,7 +136,7 @@ async function route(request: Request, env: CloudEnv, ec: ExecutionContext, url:
   const ogSlug = /^\/api\/og\/([a-z0-9-]{1,48})\.(?:jpg|png)$/.exec(pathname)?.[1];
   if (ogSlug && (method === "GET" || method === "HEAD")) return serveOgImage(request, rc, env, ec, url, ogSlug);
 
-  if (pathname.startsWith("/api/admin/")) return adminRoute(request, rc, adminAuth(env), url);
+  if (pathname.startsWith("/api/admin/")) return adminRoute(request, rc, passwordLoginFor(env), url);
 
   // Static files pass through; any HTML that comes back (SPA fallback for /admin/<sub>, /r, /foo) still gets this tenant's boot JSON.
   if (!pathname.startsWith("/api/")) return serveFallback(request, env, rc, url);

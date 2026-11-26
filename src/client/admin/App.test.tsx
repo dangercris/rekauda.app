@@ -95,6 +95,7 @@ describe("session", () => {
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Falta configurar el acceso" })).toBeInTheDocument();
     expect(screen.getByText("ADMIN_PASSWORD")).toBeInTheDocument();
+    expect(screen.queryByText("SESSION_SECRET")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Contraseña")).not.toBeInTheDocument();
   });
 

@@ -18,7 +18,7 @@ describe("self-host template (wrangler.example.jsonc)", () => {
   });
 
   it("keeps the self-host secrets and stays distinct from the multi-tenant example", () => {
-    expect(example.secrets?.required).toEqual(["ADMIN_PASSWORD", "SESSION_SECRET", "FORWARD_TO"]);
+    expect(example.secrets?.required).toEqual(["ADMIN_PASSWORD", "FORWARD_TO"]);
     expect(read("wrangler.cloud.example.jsonc").vars?.["TENANCY"]).toBe("multi");
   });
 });

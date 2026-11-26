@@ -8,7 +8,7 @@ export type SessionState =
   | { status: "checking" }
   | { status: "signedOut"; notice: string | null }
   | { status: "signedIn" }
-  /** The Worker has no ADMIN_PASSWORD / SESSION_SECRET (503 `admin_disabled`). */
+  /** The Worker has no ADMIN_PASSWORD (503 `admin_disabled`). */
   | { status: "disabled"; message: string }
   /** The session check itself failed (offline, server error): offer a retry. */
   | { status: "error"; message: string };

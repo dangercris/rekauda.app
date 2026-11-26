@@ -4,7 +4,7 @@ import { adminRoute } from "./admin";
 import { processDeunaRaw } from "./email/handler";
 import type { TestDb } from "./test/d1";
 import { TENANT_A } from "./test/d1-cloud";
-import { ADMIN_AUTH, adminCookie, createHarness, seedPaymentFor, type Harness } from "./test/harness";
+import { adminCookie, createHarness, seedPaymentFor, type Harness } from "./test/harness";
 import { withInstance, TEST_INSTANCE } from "./test/config";
 import { generateKey, signMessage, type TestKey } from "./test/sign";
 
@@ -55,7 +55,7 @@ async function upload(content: string | Uint8Array, options: { session?: boolean
   if (options.session !== false) reqHeaders.set("cookie", cookie);
   const request = new Request(`${ORIGIN}/api/admin/movements/import`, { method: "POST", headers: reqHeaders, body });
   try {
-    return await adminRoute(request, h.a, ADMIN_AUTH, new URL(request.url));
+    return await adminRoute(request, h.a, null, new URL(request.url));
   } catch (e) {
     const status = (e as { status?: number }).status;
     if (typeof status === "number") return Response.json({ error: (e as { code?: string }).code }, { status });
@@ -72,7 +72,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   h = createHarness();
   db = h.raw;
-  cookie = await adminCookie();
+  cookie = await adminCookie(h.a);
   logs = [];
   stubDns(key);
   vi.spyOn(console, "log").mockImplementation((line: unknown) => {
@@ -100,7 +100,7 @@ describe("POST /api/admin/movements/import", () => {
 
   it("rejects a cross-origin upload", async () => {
     const request = new Request(`${ORIGIN}/api/admin/movements/import`, { method: "POST", headers: { origin: "https://evil.test", cookie } });
-    await expect(adminRoute(request, h.a, ADMIN_AUTH, new URL(request.url))).rejects.toMatchObject({ status: 403 });
+    await expect(adminRoute(request, h.a, null, new URL(request.url))).rejects.toMatchObject({ status: 403 });
   });
 
   it("stores a DKIM-valid notification (folded SES-style signature) and links it, answering with the payment code", async () => {
