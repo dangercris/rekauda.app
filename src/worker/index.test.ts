@@ -380,7 +380,7 @@ describe("email()", () => {
     expect(raw.sqlite.prepare("SELECT count(*) AS n FROM bank_movements").get()).toMatchObject({ n: 0 });
   });
 
-  it("multi mode rejects until per-tenant inbound routing exists: no forward, no database or storage write", async () => {
+  it("multi mode rejects an unknown recipient: no forward, no database or storage write (routing itself is covered in email/multi.test.ts)", async () => {
     const { env, raw, bucket } = setup("multi");
     const { message, forward, setReject } = mail();
     await worker.email(message, env);
@@ -390,6 +390,41 @@ describe("email()", () => {
     expect(bucket.objects.size).toBe(0);
     const logged = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[0])).join("\n");
     expect(logged).not.toContain("d-token");
+  });
+});
+
+describe("email() mode guard and scheduled() retention", () => {
+  const mail = () => {
+    const forward = vi.fn(async () => ({ messageId: "x" }));
+    const setReject = vi.fn();
+    const message = { from: "x@example.test", to: "d-token@in.localhost", headers: new Headers(), raw: new Response("x").body, rawSize: 1, setReject, forward } as unknown as ForwardableEmailMessage;
+    return { message, forward, setReject };
+  };
+
+  it("rejects without reading when TENANCY is neither single nor multi", async () => {
+    const { env } = setup("multi");
+    const { message, forward, setReject } = mail();
+    await worker.email(message, { ...env, TENANCY: "bogus" } as unknown as CloudEnv);
+    expect(setReject).toHaveBeenCalledTimes(1);
+    expect(forward).not.toHaveBeenCalled();
+  });
+
+  it("scheduled() purges archived mail older than 30 days, using the scheduled time as the clock", async () => {
+    const { env } = setup("multi");
+    const archive = new FakeBucket();
+    const T = "a0000000-0000-4000-8000-00000000000a";
+    for (const key of [`t/${T}/2026-10-01/old.eml`, `t/${T}/2026-11-20/new.eml`]) archive.objects.set(key, "x");
+    const controller = { scheduledTime: Date.parse("2026-11-26T03:17:00.000Z"), cron: "17 3 * * *", noRetry: () => undefined } as unknown as ScheduledController;
+    await worker.scheduled!(controller, { ...env, MAIL_ARCHIVE: asR2(archive) } as unknown as CloudEnv);
+    expect([...archive.objects.keys()]).toEqual([`t/${T}/2026-11-20/new.eml`]);
+  });
+
+  it("scheduled() does nothing without a mail bucket, and never throws when the purge fails", async () => {
+    const { env } = setup("single");
+    const controller = { scheduledTime: Date.now(), cron: "", noRetry: () => undefined } as unknown as ScheduledController;
+    await expect(worker.scheduled!(controller, env)).resolves.toBeUndefined();
+    const broken = { list: async () => Promise.reject(new Error("r2 down")) };
+    await expect(worker.scheduled!(controller, { ...env, MAIL_ARCHIVE: broken } as unknown as CloudEnv)).resolves.toBeUndefined();
   });
 });
 

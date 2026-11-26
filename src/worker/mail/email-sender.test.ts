@@ -36,3 +36,21 @@ describe("CloudflareEmailSender", () => {
     expect(() => new CloudflareEmailSender(binding() as unknown as SendEmail, "bad sender")).toThrow(MimeError);
   });
 });
+
+describe("CloudflareEmailSender attachments", () => {
+  const attachment = { filename: "correo.eml", type: "message/rfc822", content: new Uint8Array([1, 2, 3]) };
+
+  it("passes attachments as attachment-disposition parts", async () => {
+    const b = binding();
+    await new CloudflareEmailSender(b as unknown as SendEmail, "no-reply@rekauda.test").send({ ...email, attachments: [attachment] });
+    expect(b.sent[0]).toMatchObject({ attachments: [{ disposition: "attachment", filename: "correo.eml", type: "message/rfc822", content: attachment.content }] });
+  });
+
+  it("refuses a filename or type with a line break before calling the binding", async () => {
+    const b = binding();
+    const sender = new CloudflareEmailSender(b as unknown as SendEmail, "no-reply@rekauda.test");
+    await expect(sender.send({ ...email, attachments: [{ ...attachment, filename: "a\r\nBcc: x" }] })).rejects.toBeInstanceOf(MimeError);
+    await expect(sender.send({ ...email, attachments: [{ ...attachment, type: "text/plain\nX: y" }] })).rejects.toBeInstanceOf(MimeError);
+    expect(b.sent).toEqual([]);
+  });
+});

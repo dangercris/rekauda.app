@@ -14,12 +14,13 @@ const RAW_NAMES = ["DB", "RECEIPTS", "MAIL_ARCHIVE", "SEND_EMAIL", "D1Database",
 
 /** Files allowed to name a raw binding, and which names each may use. */
 const ALLOWLIST: Record<string, string[]> = {
-  "index.ts": ["DB", "RECEIPTS", "SEND_EMAIL"],
+  "index.ts": ["DB", "RECEIPTS", "MAIL_ARCHIVE", "SEND_EMAIL"],
   "env.ts": ["DB", "RECEIPTS", "MAIL_ARCHIVE", "SEND_EMAIL", "D1Database", "R2Bucket"],
   "context.ts": ["D1Database", "R2Bucket"],
   "data/platform-db.ts": ["D1Database"],
   "data/tenant-db.ts": ["D1Database"],
   "storage/tenant-storage.ts": ["R2Bucket"],
+  "storage/mail-archive.ts": ["R2Bucket"],
 };
 
 /**
@@ -147,7 +148,9 @@ describe("raw binding allowlist", () => {
   it("ignores mentions in comments and accepts allowlisted uses only for their own patterns", () => {
     expect(scanSource("handler.ts", "// never call env.DB here\n/* env.RECEIPTS */ const x = 1;")).toEqual([]);
     expect(scanSource("index.ts", "env.DB.prepare('x')")).toEqual([]);
-    expect(scanSource("index.ts", "env.MAIL_ARCHIVE.put(k, v)")).toEqual(["index.ts: MAIL_ARCHIVE"]);
+    expect(scanSource("index.ts", "env.MAIL_ARCHIVE.put(k, v)")).toEqual([]);
+    expect(scanSource("storage/mail-archive.ts", "const b: R2Bucket = x")).toEqual([]);
+    expect(scanSource("storage/mail-archive.ts", "env.MAIL_ARCHIVE.put(k, v)")).toEqual(["storage/mail-archive.ts: MAIL_ARCHIVE"]);
     expect(scanSource("context.ts", "env.DB.prepare('x')")).toEqual(["context.ts: DB"]);
     expect(scanSource("handler.ts", 'const text = "see env.DB and D1Database in this string";')).toEqual([]);
   });

@@ -51,6 +51,9 @@
 
   "r2_buckets": [
     { "binding": "RECEIPTS", "bucket_name": "rekauda-cloud-example-files" },
+    // Raw inbound Deuna mail, keys t/<tenantId>/<day>/<uuid>.eml. The daily cron below enforces the 30-day retention; an R2
+    // lifecycle rule on THIS bucket is a recommended extra layer and a manual owner step (docs/CORREO-DEUNA.md). Inbound mail needs ONE catch-all Email
+    // Routing rule on INBOUND_DOMAIN (a subdomain, never the pilot apex) pointing at this Worker, also done by hand.
     { "binding": "MAIL_ARCHIVE", "bucket_name": "rekauda-cloud-example-mail" }
   ],
 
@@ -66,6 +69,10 @@
     { "name": "LOGIN_LIMITER", "namespace_id": "2002", "simple": { "limit": 5, "period": 60 } },
     { "name": "LOOKUP_LIMITER", "namespace_id": "2003", "simple": { "limit": 20, "period": 60 } }
   ],
+
+  // Daily purge of archived inbound mail older than 30 days (scheduled() in src/worker/index.ts). Config only: the cron
+  // starts when this config is deployed, which phase 1 never does.
+  "triggers": { "crons": ["17 3 * * *"] },
 
   "observability": { "enabled": true }
 }
