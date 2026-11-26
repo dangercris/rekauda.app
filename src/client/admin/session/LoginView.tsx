@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { errorMessage, isApiRequestError } from "../../lib/api";
+import { errorMessage, isApiRequestError, requestMagicLink } from "../../lib/api";
 import { useInstanceConfig } from "../../lib/config/useInstance";
 import { BrandPill, Button, Card, InfoNote, Notice, Spinner, TextField, Toggle } from "../../ui";
 import type { SessionApi } from "./useSession";
@@ -18,7 +18,8 @@ export function SessionGate({ session }: { session: SessionApi }) {
         </div>
       )}
       {state.status === "signedOut" &&
-        (auth.mode === "magic_link" ? <MagicLinkPlaceholder notice={state.notice} /> : <LoginForm onLogin={session.login} notice={state.notice} />)}
+        (auth.mode === "magic_link" ? <MagicLinkForm notice={state.notice} /> : <LoginForm onLogin={session.login} notice={state.notice} />)}
+      {state.status === "confirmLink" && <LinkConfirm onConfirm={session.confirmLink} />}
       {state.status === "disabled" && <SetupNotice message={state.message} onRetry={session.retry} />}
       {state.status === "error" && (
         <Card className={styles.card} gap={16}>
@@ -32,15 +33,98 @@ export function SessionGate({ session }: { session: SessionApi }) {
   );
 }
 
-/** Cloud accounts sign in with an emailed link, which is not available yet: no form, so nobody types a password here. */
-function MagicLinkPlaceholder({ notice }: { notice: string | null }) {
+/**
+ * Cloud accounts sign in with an emailed link. The confirmation is the same for every address on purpose: it never says
+ * whether the address belongs to someone. Opening the link is handled by useSession (linkLogin.ts), not here.
+ */
+function MagicLinkForm({ notice }: { notice: string | null }) {
+  const [email, setEmail] = useState("");
+  const [phase, setPhase] = useState<"idle" | "sending" | "sent">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (phase === "sending") return;
+    if (!email.trim()) {
+      setError("Escribe tu correo.");
+      inputRef.current?.focus();
+      return;
+    }
+    setPhase("sending");
+    setError(null);
+    try {
+      await requestMagicLink(email.trim());
+      setPhase("sent");
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setPhase("idle");
+    }
+  };
+
+  if (phase === "sent") {
+    return (
+      <Card className={styles.card} gap={16}>
+        <Notice tone="ok" icon="mail" title="Revisa tu correo" description="Si el correo está registrado, te enviamos un enlace para ingresar. Vence en 15 minutos y solo se puede usar una vez." live />
+        <Button variant="glass" iconStart="refresh" onClick={() => setPhase("idle")}>
+          Usar otro correo
+        </Button>
+      </Card>
+    );
+  }
+
+  return (
+    <form className={styles.card} onSubmit={submit} noValidate aria-labelledby="login-title">
+      <Card gap={16}>
+        <div className={styles.heading}>
+          <h1 id="login-title" className={styles.title}>
+            Ingreso con tu correo
+          </h1>
+          <p className={styles.lead}>Te enviamos un enlace para ingresar, sin contraseña.</p>
+        </div>
+        {notice && <Notice tone="warn" icon="clock" title={notice} live />}
+        <TextField
+          ref={inputRef}
+          label="Correo electrónico"
+          type="email"
+          autoComplete="email"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          value={email}
+          onChange={(event) => {
+            setEmail(event.target.value);
+            if (error) setError(null);
+          }}
+          error={error ?? undefined}
+          disabled={phase === "sending"}
+        />
+        <Button type="submit" variant="ink" size="lg" fullWidth loading={phase === "sending"} iconEnd={phase === "sending" ? undefined : "arrow-right"}>
+          Enviar enlace
+        </Button>
+        <InfoNote icon="shield">El enlace funciona una sola vez. Los comprobantes y teléfonos solo se ven aquí.</InfoNote>
+      </Card>
+    </form>
+  );
+}
+
+/** Opening an emailed link only offers the sign-in: a click is required, so a link someone else sent cannot sign you in silently. */
+function LinkConfirm({ onConfirm }: { onConfirm: () => Promise<void> }) {
+  const { className, classShortName } = useInstanceConfig();
   return (
     <Card className={styles.card} gap={16}>
       <div className={styles.heading}>
-        <h1 className={styles.title}>Ingreso con tu correo</h1>
-        <p className={styles.lead}>Pronto podrás ingresar con tu correo. Mientras tanto, esta página aún no permite el acceso.</p>
+        <h1 className={styles.title}>Confirma tu ingreso</h1>
+        <p className={styles.lead}>Abriste un enlace de acceso a la tesorería de {className}.</p>
       </div>
-      {notice && <Notice tone="warn" icon="clock" title={notice} live />}
+      <Button variant="ink" size="lg" fullWidth iconEnd="arrow-right" onClick={() => void onConfirm()}>
+        Ingresar a {classShortName}
+      </Button>
+      <InfoNote icon="shield">Si no pediste este enlace, cierra esta página.</InfoNote>
     </Card>
   );
 }

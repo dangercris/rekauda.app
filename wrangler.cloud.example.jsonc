@@ -56,7 +56,8 @@
 
   "images": { "binding": "IMAGES" },
 
-  // Placeholder: the real send_email shape is verified in the sandbox (slice 4).
+  // UNVERIFIED (beta): src/worker/mail/email-sender.ts uses the structured send({ from, to, subject, text }) form, from no-reply@<ROOT_DOMAIN>.
+  // The shape, quotas and sender-domain onboarding are checked in the sandbox (PR10 checklist) before magic links go live.
   "send_email": [{ "name": "SEND_EMAIL" }],
 
   // namespace_id values differ from wrangler.example.jsonc on purpose.

@@ -54,11 +54,11 @@ describe("login screen follows config.auth.mode", () => {
     expect(screen.queryByText(/6 horas/)).toBeNull();
   });
 
-  it("magic_link: shows a neutral placeholder and no password form (magic links arrive in a later release)", async () => {
+  it("magic_link: asks for the email and offers no password form", async () => {
     stub(tenantB, false);
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Ingreso con tu correo" })).toBeInTheDocument();
-    expect(screen.getByText(/Pronto podrás ingresar con tu correo/)).toBeInTheDocument();
+    expect(await screen.findByLabelText("Correo electrónico")).toBeInTheDocument();
     expect(screen.queryByLabelText("Contraseña")).toBeNull();
     expect(screen.queryByRole("button", { name: "Ingresar" })).toBeNull();
   });

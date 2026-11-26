@@ -96,6 +96,20 @@ export interface AdminLoginInput {
   password: string;
 }
 
+/**
+ * POST /api/admin/magic-link (Cloud tenants only, 404 in self-host). Answers the same 200 `{ ok: true }` whether or not
+ * the address belongs to a member, so it cannot be used to discover accounts. 400 only for a malformed address, 429 when rate limited.
+ * The emailed link is `<tenant origin>/admin#acceso=<token>`: the token stays in the URL fragment, which browsers never send to a server.
+ */
+export interface MagicLinkRequestInput {
+  email: string;
+}
+
+/** POST /api/admin/magic-link/verify: 200 and the session cookie, or 401 `invalid_link` (unknown, expired, used or foreign token alike). */
+export interface MagicLinkVerifyInput {
+  token: string;
+}
+
 /** Item of GET /api/collections (archived collections are excluded). */
 export interface CollectionSummary extends CollectionTheme {
   slug: string;
@@ -330,7 +344,7 @@ export interface AdminStatusResponse {
 
 /**
  * Receipt file: GET /api/admin/receipts/:paymentId (images inline, PDFs as attachment).
- * Session: POST /api/admin/login {password} (self-host), POST /api/admin/logout, GET /api/admin/session.
+ * Session: POST /api/admin/login {password} (self-host), POST /api/admin/magic-link and /verify (Cloud), POST /api/admin/logout, GET /api/admin/session.
  * The session is an opaque `__Host-rk_session` cookie (host-only, HttpOnly, Secure, SameSite=Strict, 7 days) bound to one tenant.
  */
 

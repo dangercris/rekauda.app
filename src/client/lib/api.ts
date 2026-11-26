@@ -53,6 +53,16 @@ export async function adminLogin(password: string, options?: RequestOptions): Pr
   await send("POST", "/api/admin/login", { kind: "json", value: { password } }, options ?? {}, DEFAULT_TIMEOUT);
 }
 
+/** Always resolves for a well-formed address (the answer never says whether it has an account). Rejects 400 (malformed) and 429. */
+export async function requestMagicLink(email: string, options?: RequestOptions): Promise<void> {
+  await send("POST", "/api/admin/magic-link", { kind: "json", value: { email } }, options ?? {}, DEFAULT_TIMEOUT);
+}
+
+/** Rejects with 401 `invalid_link` for any unusable token (expired, used, unknown, another school's) and 429 when rate limited. */
+export async function verifyMagicLink(token: string, options?: RequestOptions): Promise<void> {
+  await send("POST", "/api/admin/magic-link/verify", { kind: "json", value: { token } }, options ?? {}, DEFAULT_TIMEOUT);
+}
+
 export async function adminLogout(options?: RequestOptions): Promise<void> {
   await send("POST", "/api/admin/logout", { kind: "json", value: {} }, options ?? {}, DEFAULT_TIMEOUT);
 }

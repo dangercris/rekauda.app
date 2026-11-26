@@ -8,6 +8,7 @@ import type {
 } from "../shared/api";
 import { PAYMENT_STATUSES } from "../shared/api";
 import { adminListCollections, createCollection, mutationResponse, updateCollection } from "./admin-collections";
+import { requestMagicLink, verifyMagicLink, type MagicLinkDeps } from "./auth/magic-link";
 import { assertSameOrigin, isSafeMethod } from "./auth/origin";
 import { passwordLogin, type PasswordLogin } from "./auth/password";
 import { SessionStore, clearSessionCookie } from "./auth/sessions";
@@ -26,9 +27,16 @@ const UUID_36 = /^[0-9a-f-]{36}$/;
 /**
  * Admin gate: every route needs a D1 session of THIS tenant whose member holds a role here (owner or co_treasurer, both
  * may review payments). `login` is the self-host password provider, null everywhere else (Cloud signs in with magic
- * links). `now` is the session clock.
+ * links, `magic`, null when not configured). `now` is the session and magic-link clock.
  */
-export async function adminRoute(request: Request, rc: RequestContext, login: PasswordLogin | null, url: URL, now: () => number = Date.now): Promise<Response> {
+export async function adminRoute(
+  request: Request,
+  rc: RequestContext,
+  login: PasswordLogin | null,
+  url: URL,
+  now: () => number = Date.now,
+  magic: MagicLinkDeps | null = null,
+): Promise<Response> {
   const selfHost = rc.tenant.source === "self_host";
   if (selfHost && !login) throw new HttpError(503, "admin_disabled", "El acceso de administración no está configurado.");
   const { pathname } = url;
@@ -41,6 +49,10 @@ export async function adminRoute(request: Request, rc: RequestContext, login: Pa
   if (pathname === "/api/admin/login" && method === "POST") {
     if (!selfHost || !login) throw new HttpError(404, "not_found", "Ruta no encontrada.");
     return passwordLogin(request, rc, login, sessions);
+  }
+  if ((pathname === "/api/admin/magic-link" || pathname === "/api/admin/magic-link/verify") && method === "POST") {
+    if (selfHost || !magic) throw new HttpError(404, "not_found", "Ruta no encontrada.");
+    return pathname === "/api/admin/magic-link" ? requestMagicLink(request, rc, magic, url, now) : verifyMagicLink(request, rc, magic, sessions, now);
   }
   if (pathname === "/api/admin/logout" && method === "POST") {
     await sessions.revoke(request);

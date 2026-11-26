@@ -14,6 +14,7 @@
  */
 import { serveDeunaQr } from "./assets";
 import { adminRoute } from "./admin";
+import type { MagicLinkDeps } from "./auth/magic-link";
 import type { PasswordLogin } from "./auth/password";
 import { serveFallback, servePage, serveShell } from "./boot";
 import { buildContext } from "./context";
@@ -23,6 +24,7 @@ import { collectionBoard, collectionDetail, listCollections } from "./collection
 import { serveCover } from "./covers";
 import type { CloudEnv } from "./env";
 import { HttpError, enforceLimit, fail, json } from "./http";
+import { CloudflareEmailSender } from "./mail/email-sender";
 import { serveOgImage } from "./og-image";
 import { createPayment, lookup } from "./payments";
 import { toPublicConfig } from "./public-config";
@@ -94,6 +96,27 @@ function passwordLoginFor(env: CloudEnv): PasswordLogin | null {
   return env.TENANCY === "single" && env.ADMIN_PASSWORD ? { adminPassword: env.ADMIN_PASSWORD, limiter: env.LOGIN_LIMITER } : null;
 }
 
+/**
+ * Magic links exist only in multi mode. The sender address is `no-reply@<ROOT_DOMAIN>` (its domain must be onboarded for
+ * send_email, see the sandbox checklist). A misconfigured address disables the feature (404) instead of breaking all of admin.
+ */
+function magicLinkFor(env: CloudEnv, ec: ExecutionContext): MagicLinkDeps | null {
+  if (env.TENANCY !== "multi") return null;
+  try {
+    if (!env.SEND_EMAIL) throw new Error("SEND_EMAIL binding missing");
+    return {
+      sender: new CloudflareEmailSender(env.SEND_EMAIL, `no-reply@${env.ROOT_DOMAIN}`),
+      members: new PlatformDb(env.DB),
+      limiter: env.LOGIN_LIMITER,
+      rootDomain: env.ROOT_DOMAIN,
+      defer: (work) => ec.waitUntil(work()),
+    };
+  } catch {
+    console.error(JSON.stringify({ message: "magic_link_not_configured" }));
+    return null;
+  }
+}
+
 /** Multi: the tenant's validated `config_json` (cached per isolate). Single: the bundled config. */
 function configStoreFor(env: CloudEnv): ConfigStore {
   return env.TENANCY === "multi" ? new D1ConfigStore(new PlatformDb(env.DB), tenancyState.configCache, tenancyState.configLastGood) : tenancyState.bundled;
@@ -136,7 +159,7 @@ async function route(request: Request, env: CloudEnv, ec: ExecutionContext, url:
   const ogSlug = /^\/api\/og\/([a-z0-9-]{1,48})\.(?:jpg|png)$/.exec(pathname)?.[1];
   if (ogSlug && (method === "GET" || method === "HEAD")) return serveOgImage(request, rc, env, ec, url, ogSlug);
 
-  if (pathname.startsWith("/api/admin/")) return adminRoute(request, rc, passwordLoginFor(env), url);
+  if (pathname.startsWith("/api/admin/")) return adminRoute(request, rc, passwordLoginFor(env), url, Date.now, magicLinkFor(env, ec));
 
   // Static files pass through; any HTML that comes back (SPA fallback for /admin/<sub>, /r, /foo) still gets this tenant's boot JSON.
   if (!pathname.startsWith("/api/")) return serveFallback(request, env, rc, url);
