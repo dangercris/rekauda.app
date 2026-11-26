@@ -71,7 +71,9 @@ pnpm build
 | Datos personales | Ninguno en pruebas, fixtures, registros ni documentación. Usa datos inventados (`tesoreria@ejemplo.com`, `0000000000`, nombres ficticios) |
 | Seguridad | No aflojes la CSP (`public/_headers` y `src/worker/og.ts` deben coincidir), no pongas analíticas en el panel y no hagas que la automatización marque `pagado` |
 | Registros | Una línea JSON con `message`. Nunca incluir correos, nombres de familias ni secretos |
-| Migraciones | Archivos nuevos y numerados en `migrations/`. No edites migraciones ya aplicadas |
+| Migraciones | Archivos nuevos y numerados en `migrations/`. No edites migraciones ya aplicadas. En `feat/cloud` el esquema vive en `migrations-cloud/` y `migrations/` no se modifica |
+| SQL de tenants (`feat/cloud`) | Solo con `TenantDb` (`src/worker/data/tenant-db.ts`). `?1` es el tenant y no se usa en otro lugar, los demás parámetros empiezan en `?2` (nunca `?` sin número), no se usa `OR`, `UNION` ni `WITH`, y cada tabla del tenant lleva su propio `<alias>.tenant_id = ?1` en el `WHERE` o en el `ON` de su `JOIN`. Las tablas globales (`tenants`, `tenant_domains`, `users`) solo se tocan con `PlatformDb`. El verificador es `src/worker/data/sql-scope.ts` y falla cerrado |
+| Pruebas de fuga | Todo manejador o consulta nueva que lea o escriba datos de un tenant necesita una prueba en `src/worker/leak.test.ts` con dos tenants que comparten slug, código de pago y número de transacción: el id de uno consultado desde el otro debe dar 404, y la prueba corre con el espía de SQL (`src/worker/test/sql-spy.ts`). Los manejadores no reciben `env.DB` ni otros bindings: `src/worker/architecture.test.ts` lo vigila |
 
 ## Commits y pull requests
 

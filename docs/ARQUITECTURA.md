@@ -204,6 +204,18 @@ Código en `src/worker/email/`. Puntos de diseño:
 
 Los motivos y eventos de registro están en [CORREO-DEUNA.md](CORREO-DEUNA.md#solución-de-problemas).
 
+## Rekauda Cloud (multi-curso)
+
+En la rama `feat/cloud` el mismo Worker atiende varios cursos (tenants) sobre una sola D1. La rama solo corre en local; antes de publicarla hay que ejecutar la [lista de verificación en sandbox](CLOUD-SANDBOX-CHECKLIST.md).
+
+- **`TENANCY`** (`vars` de `wrangler.cloud.jsonc`): `multi` resuelve el tenant por el `Host` (`src/worker/tenancy/host.ts`, `resolver.ts`); `single` es el autoalojamiento, con un solo tenant sembrado a partir de `rekauda.config.ts`. La raíz de composición es `src/worker/index.ts`.
+- **Esquema**: `migrations-cloud/` (la carpeta `migrations/` es del piloto y no se toca). Una instalación autoalojada nueva usa el mismo esquema.
+- **Capa de tenancy**: los manejadores reciben un `RequestContext` y nunca `env.DB`, `RECEIPTS`, `MAIL_ARCHIVE` ni `SEND_EMAIL` (lo verifica `src/worker/architecture.test.ts`). El acceso a tablas del tenant pasa por `TenantDb` (`src/worker/data/tenant-db.ts`) y el verificador `sql-scope.ts`: `?1` es siempre el tenant, los demás parámetros empiezan en `?2`, no se permite `OR`, y cada tabla del tenant lleva su `tenant_id = ?1`. Las tablas globales (`tenants`, `tenant_domains`, `users`) solo se leen con `PlatformDb`.
+- **Configuración**: `D1ConfigStore` (Cloud) o `BundledConfigStore` (autoalojamiento). `src/worker/boot.ts` inyecta la parte pública en la página como `<script type="application/json" id="rekauda-config">`, y el cliente la lee con `ConfigProvider`. Si falta, pide `/api/config`.
+- **Sesiones y enlaces mágicos**: sesiones opacas en D1 (`auth/sessions.ts`, cookie `__Host-rk_session`); en Cloud se entra con enlace mágico (`auth/magic-link.ts`, fragmento `#acceso=<token>` y `POST` de verificación); el autoalojamiento usa `ADMIN_PASSWORD`.
+- **Correo de Deuna por curso**: cada tenant tiene un token y recibe en `d-<token>@INBOUND_DOMAIN`. DKIM y el analizador no cambian. Los originales se archivan en `MAIL_ARCHIVE` 30 días (cron `scheduled()`). Detalles en [CORREO-DEUNA.md](CORREO-DEUNA.md).
+- **Scripts**: `pnpm cloud:guard`, `cloud:migrate:local`, `cloud:seed:local`, `cloud:dev` y `cloud:types`, todos con la guarda `scripts/cloud-guard.mjs`. En esta rama `deploy` y `db:migrate:remote` se niegan.
+
 ## Resumen del modelo de amenazas
 
 | Amenaza | Mitigación |
