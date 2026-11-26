@@ -121,6 +121,8 @@ La rama `feat/cloud` prepara una versión multi-curso: un solo Worker, un subdom
 
 En esta rama los comandos `dev:api`, `db:migrate:local`, `db:migrate:remote`, `types` y `deploy` se niegan a correr (son del piloto, en `main`). Para autoalojar o probar usa los equivalentes `pnpm cloud:migrate:local`, `pnpm cloud:seed:local`, `pnpm cloud:dev` y `pnpm cloud:types`, con `TENANCY` en `single` en `wrangler.cloud.jsonc` para un solo curso. Detalles en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md#rekauda-cloud-multi-curso).
 
+La guarda de seguridad lee `wrangler.jsonc` y, opcionalmente, `.pilot-resources.json` (ignorado por git, nunca se sube) para rechazar nombres, ids y dominios reales del piloto. Su forma, con valores inventados, está en [docs/CLOUD-SANDBOX-CHECKLIST.md](docs/CLOUD-SANDBOX-CHECKLIST.md#preámbulo-de-seguridad-del-piloto).
+
 ## 📚 Documentación
 
 | Documento | Para quién | Contenido |

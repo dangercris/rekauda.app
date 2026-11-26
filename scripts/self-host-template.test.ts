@@ -30,8 +30,11 @@ function workerFirst(rules: string[], path: string): boolean {
   return !excluded && rules.filter((r) => !r.startsWith("!")).some(matches);
 }
 
-describe("multi-tenant example run_worker_first", () => {
-  const rules = read("wrangler.cloud.example.jsonc").assets?.run_worker_first ?? [];
+describe.each([
+  ["multi-tenant example", "wrangler.cloud.example.jsonc"],
+  ["self-host template", "wrangler.example.jsonc"],
+])("%s run_worker_first", (_name, file) => {
+  const rules = read(file).assets?.run_worker_first ?? [];
 
   it.each(["/", "/admin", "/admin/acceso", "/r/demo-collection", "/index.html", "/admin.html", "/api/config", "/api/assets/deuna-qr.png", "/api/og/demo-collection.png"])(
     "runs the Worker first for %s, so every HTML entry gets its tenant's config",
