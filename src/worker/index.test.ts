@@ -3,12 +3,13 @@
  * unknown-host read guard, admin disabled in multi mode and the email() entry point. og-image (WASM renderer) is stubbed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SESSION_COOKIE, SessionStore } from "./auth/sessions";
+import { TenantDb } from "./data/tenant-db";
 import type { CloudEnv } from "./env";
 import worker from "./index";
 import { resetTenancyState } from "./tenancy/runtime";
 import { asD1, type TestDb } from "./test/d1";
 import { TENANT_A, TENANT_B, createCloudTestDb } from "./test/d1-cloud";
-import { adminCookie } from "./test/harness";
 import { FakeBucket, asR2 } from "./test/r2-fake";
 import { generateKey, signMessage } from "./test/sign";
 import { SELF_HOST_TENANT_ID } from "./data/platform-db";
@@ -61,12 +62,33 @@ function setup(mode: "multi" | "single", options: { seed?: boolean; limitOk?: bo
   const env =
     mode === "multi"
       ? { ...common, TENANCY: "multi", ROOT_DOMAIN: "localhost", INBOUND_DOMAIN: "in.localhost", MAIL_ARCHIVE: asR2(new FakeBucket()), SEND_EMAIL: {} }
-      : { ...common, TENANCY: "single", ADMIN_PASSWORD: "pw", SESSION_SECRET: "test-session-secret", FORWARD_TO: "treasurer@example.test" };
+      : { ...common, TENANCY: "single", ADMIN_PASSWORD: "pw", FORWARD_TO: "treasurer@example.test" };
   return { raw, bucket, lookups, assetCalls, limiterKeys, env: env as unknown as CloudEnv };
 }
 
 const get = (env: CloudEnv, host: string, path: string, headers: Record<string, string> = {}) =>
   worker.fetch(new Request(`https://${host}${path}`, { headers: { "cf-connecting-ip": "203.0.113.1", ...headers } }), env, ec);
+
+/** A cloud session cookie for `owner` of `tenantId`, created straight in the database. */
+async function cloudCookie(raw: TestDb, tenantId: string, owner: string): Promise<string> {
+  const { token } = await new SessionStore(new TenantDb(asD1(raw), tenantId)).create(owner);
+  return `${SESSION_COOKIE}=${token}`;
+}
+const OWNER_A = "u0000000-0000-4000-8000-00000000000a";
+
+/** Logs in to a single-mode instance through the Worker and returns the session cookie it set. */
+async function singleCookie(env: CloudEnv, host: string): Promise<string> {
+  const res = await worker.fetch(
+    new Request(`https://${host}/api/admin/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: `https://${host}`, "cf-connecting-ip": "203.0.113.1" },
+      body: JSON.stringify({ password: "pw" }),
+    }),
+    env,
+    ec,
+  );
+  return (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+}
 
 beforeEach(() => {
   resetTenancyState();
@@ -135,12 +157,50 @@ describe("multi mode tenant resolution", () => {
 });
 
 describe("admin in multi mode", () => {
-  it("stays disabled (503) even if an admin password secret exists, because the legacy cookie is not tenant-bound", async () => {
+  const adminGet = (env: CloudEnv, host: string, headers: Record<string, string> = {}) =>
+    worker.fetch(new Request(`https://${host}/api/admin/payments`, { headers: { "cf-connecting-ip": "203.0.113.1", ...headers } }), env, ec);
+
+  it("answers 401, not 503, without a session even when a password secret exists, and offers no password login", async () => {
     const { env } = setup("multi");
-    const withSecrets = { ...env, ADMIN_PASSWORD: "pw", SESSION_SECRET: "s" } as unknown as CloudEnv;
-    const cookie = await adminCookie();
-    const res = await worker.fetch(new Request("https://demo-a.localhost/api/admin/payments", { headers: { cookie, "cf-connecting-ip": "203.0.113.1" } }), withSecrets, ec);
-    expect(res.status).toBe(503);
+    const withSecrets = { ...env, ADMIN_PASSWORD: "pw" } as unknown as CloudEnv;
+    expect((await adminGet(withSecrets, "demo-a.localhost")).status).toBe(401);
+    const login = await worker.fetch(
+      new Request("https://demo-a.localhost/api/admin/login", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://demo-a.localhost", "cf-connecting-ip": "203.0.113.1" },
+        body: JSON.stringify({ password: "pw" }),
+      }),
+      withSecrets,
+      ec,
+    );
+    expect(login.status).toBe(404);
+  });
+
+  it("accepts a session of the host's tenant and rejects the same cookie value on another tenant's host", async () => {
+    const { env, raw } = setup("multi");
+    const cookie = await cloudCookie(raw, TENANT_A, OWNER_A);
+    expect((await adminGet(env, "demo-a.localhost", { cookie })).status).toBe(200);
+    expect((await adminGet(env, "demo-b.localhost", { cookie })).status).toBe(401);
+  });
+
+  it("the admin .eml import needs a session in multi mode", async () => {
+    const { env } = setup("multi");
+    const res = await worker.fetch(
+      new Request("https://demo-a.localhost/api/admin/movements/import", { method: "POST", headers: { "cf-connecting-ip": "203.0.113.1", origin: "https://demo-a.localhost" } }),
+      env,
+      ec,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("refuses a mutation with a foreign Origin before checking the session", async () => {
+    const { env } = setup("multi");
+    const res = await worker.fetch(
+      new Request("https://demo-a.localhost/api/admin/logout", { method: "POST", headers: { "cf-connecting-ip": "203.0.113.1", origin: "https://demo-b.localhost" } }),
+      env,
+      ec,
+    );
+    expect(res.status).toBe(403);
   });
 });
 
@@ -159,13 +219,13 @@ describe("single mode (self-host)", () => {
     }
   });
 
-  it("keeps the password login working and the cookie host-only", async () => {
-    const { env } = setup("single");
+  it("signs in with the password end to end: D1 session for the synthetic owner, host-only cookie, logout revokes it", async () => {
+    const { env, raw } = setup("single");
     const login = (password: string) =>
       worker.fetch(
         new Request("https://self.example.test/api/admin/login", {
           method: "POST",
-          headers: { "content-type": "application/json", origin: "https://self.example.test" },
+          headers: { "content-type": "application/json", origin: "https://self.example.test", "cf-connecting-ip": "203.0.113.1" },
           body: JSON.stringify({ password }),
         }),
         env,
@@ -174,11 +234,40 @@ describe("single mode (self-host)", () => {
     expect((await login("wrong")).status).toBe(401);
     const ok = await login("pw");
     expect(ok.status).toBe(200);
-    const cookie = ok.headers.get("set-cookie") ?? "";
-    expect(cookie).toMatch(/^adm=/);
-    expect(cookie).not.toMatch(/domain=/i);
-    expect(cookie).toMatch(/HttpOnly/);
-    expect(cookie).toMatch(/SameSite=Strict/);
+    const setCookie = ok.headers.get("set-cookie") ?? "";
+    expect(setCookie).toMatch(/^__Host-rk_session=[A-Za-z0-9_-]{43}; Path=\/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800$/);
+    expect(setCookie).not.toMatch(/domain=/i);
+    expect(raw.sqlite.prepare("SELECT COUNT(*) AS n FROM sessions").get()).toEqual({ n: 1 });
+
+    const cookie = setCookie.split(";")[0] ?? "";
+    const admin = (path: string, method = "GET") =>
+      worker.fetch(new Request(`https://self.example.test${path}`, { method, headers: { cookie, origin: "https://self.example.test", "cf-connecting-ip": "203.0.113.1" } }), env, ec);
+    expect(await (await admin("/api/admin/session")).json()).toEqual({ ok: true, role: "owner" });
+    expect((await admin("/api/admin/payments")).status).toBe(200);
+    expect((await admin("/api/admin/logout", "POST")).status).toBe(200);
+    expect(raw.sqlite.prepare("SELECT COUNT(*) AS n FROM sessions").get()).toEqual({ n: 0 });
+    expect((await admin("/api/admin/session")).status).toBe(401);
+  });
+
+  it("rate limits the password login on LOGIN_LIMITER per tenant and client", async () => {
+    const { env, limiterKeys } = setup("single");
+    await worker.fetch(
+      new Request("https://self.example.test/api/admin/login", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://self.example.test", "cf-connecting-ip": "203.0.113.5" },
+        body: JSON.stringify({ password: "wrong" }),
+      }),
+      env,
+      ec,
+    );
+    expect(limiterKeys).toEqual([`login:${SELF_HOST_TENANT_ID}:203.0.113.5`]);
+  });
+
+  it("answers 503 admin_disabled when ADMIN_PASSWORD is not set", async () => {
+    const { env } = setup("single");
+    const bare = { ...env, ADMIN_PASSWORD: "" } as unknown as CloudEnv;
+    const res = await worker.fetch(new Request("https://self.example.test/api/admin/session", { headers: { "cf-connecting-ip": "203.0.113.1" } }), bare, ec);
+    expect(res.status).toBe(503);
   });
 
   it("refuses a state-changing admin request whose Origin is not the resolved host", async () => {
@@ -389,14 +478,17 @@ describe("per-tenant runtime config", () => {
     expect(raw.sqlite.prepare("SELECT count(*) AS n FROM payments").get()).toMatchObject({ n: 0 });
   });
 
-  it("the admin .eml import is unreachable in multi mode: admin is disabled until sessions land", async () => {
-    const { env } = setup("multi");
+  it("the admin .eml import is reachable in multi mode only with a session (411 here: the request carries no file)", async () => {
+    const { env, raw } = setup("multi");
     const res = await worker.fetch(
-      new Request("https://demo-a.localhost/api/admin/movements/import", { method: "POST", headers: { "cf-connecting-ip": "203.0.113.1", cookie: await adminCookie(), origin: "https://demo-a.localhost" } }),
+      new Request("https://demo-a.localhost/api/admin/movements/import", {
+        method: "POST",
+        headers: { "cf-connecting-ip": "203.0.113.1", cookie: await cloudCookie(raw, TENANT_A, OWNER_A), origin: "https://demo-a.localhost" },
+      }),
       env,
       ec,
     );
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(411);
   });
 
   it("single mode serves the bundled config with the password sign-in mode", async () => {
@@ -445,6 +537,7 @@ describe("import database failure", () => {
     try {
       const { env, raw } = setup("single");
       await get(env, "self.example.test", "/api/collections");
+      const cookie = await singleCookie(env, "self.example.test");
       raw.sqlite.exec("CREATE TRIGGER boom BEFORE INSERT ON bank_movements BEGIN SELECT RAISE(ABORT, 'CHECK constraint failed: bank_movements.secret_rule'); END");
       const eml = await signMessage(
         key,
@@ -466,7 +559,7 @@ describe("import database failure", () => {
       const res = await worker.fetch(
         new Request("https://self.example.test/api/admin/movements/import", {
           method: "POST",
-          headers: { origin: "https://self.example.test", cookie: await adminCookie(), "content-type": packed.headers.get("content-type") ?? "", "content-length": String(bytes.byteLength) },
+          headers: { origin: "https://self.example.test", cookie, "content-type": packed.headers.get("content-type") ?? "", "content-length": String(bytes.byteLength) },
           body: bytes,
         }),
         env,

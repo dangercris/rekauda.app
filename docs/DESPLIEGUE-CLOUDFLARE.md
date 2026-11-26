@@ -165,12 +165,11 @@ El pie de la página pública incluye un crédito al autor del proyecto (`src/cl
 
 ## 6. Secretos
 
-Hay tres secretos obligatorios (`secrets.required` en `wrangler.jsonc`). Nunca van en archivos del repositorio.
+Hay dos secretos obligatorios (`secrets.required` en `wrangler.jsonc`). Nunca van en archivos del repositorio.
 
 | Secreto | Para qué |
 | --- | --- |
 | `ADMIN_PASSWORD` | Contraseña del panel `/admin` |
-| `SESSION_SECRET` | Firma de la cookie de sesión del panel |
 | `FORWARD_TO` | Correo real del tesorero que recibe copia de cada mensaje de Deuna. Debe ser una dirección de destino verificada en Email Routing (ver [CORREO-DEUNA.md](CORREO-DEUNA.md)) |
 
 Cada `wrangler secret put` crea una versión y la despliega de inmediato. Si el Worker todavía no existe, Wrangler puede preguntarte si quieres crearlo con ese nombre: responde que sí.
@@ -179,11 +178,7 @@ Cada `wrangler secret put` crea una versión y la despliega de inmediato. Si el 
 pnpm exec wrangler secret put ADMIN_PASSWORD
 ```
 
-Usa una contraseña larga y única. Wrangler la pide por entrada oculta.
-
-```bash
-openssl rand -hex 32 | pnpm exec wrangler secret put SESSION_SECRET
-```
+Usa una contraseña larga y única. Wrangler la pide por entrada oculta. Si cambias `ADMIN_PASSWORD` más adelante, ingresa de nuevo al panel con la clave nueva: ese ingreso cierra las demás sesiones abiertas.
 
 ```bash
 pnpm exec wrangler secret put FORWARD_TO
@@ -269,7 +264,7 @@ Debe responder `200`.
 curl -s -o /dev/null -w "%{http_code}\n" https://HOST/api/admin/session
 ```
 
-Debe responder `401` (sin sesión). Un `503` significa que faltan `ADMIN_PASSWORD` o `SESSION_SECRET`.
+Debe responder `401` (sin sesión). Un `503` significa que falta `ADMIN_PASSWORD`.
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" https://HOST/admin

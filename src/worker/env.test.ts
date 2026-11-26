@@ -20,7 +20,7 @@ describe("Env typing by tenancy mode", () => {
     expectTypeOf<SingleEnv["MAIL_ARCHIVE"]>().toEqualTypeOf<R2Bucket | undefined>();
     expectTypeOf<SingleEnv["SEND_EMAIL"]>().toEqualTypeOf<SendEmail | undefined>();
     expectTypeOf<SingleEnv["ROOT_DOMAIN"]>().toEqualTypeOf<string | undefined>();
-    expectTypeOf<SingleEnv["SESSION_SECRET"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<SingleEnv>().not.toHaveProperty("SESSION_SECRET");
     expectTypeOf<BaseEnv["DB"]>().toEqualTypeOf<D1Database>();
   });
 });

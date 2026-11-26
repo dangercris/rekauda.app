@@ -21,7 +21,6 @@ import {
   SHARED_CODE,
   SHARED_SLUG,
   SHARED_TRANSACTION,
-  ADMIN_AUTH,
   adminCall,
   adminCookie,
   createHarness,
@@ -247,14 +246,14 @@ describe("covers", () => {
       method: "POST",
       headers: {
         origin: "https://rekauda.test",
-        cookie: await adminCookie(),
+        cookie: await adminCookie(rc),
         "content-type": packed.headers.get("content-type") ?? "",
         "content-length": String(body.byteLength),
       },
       body,
     });
     try {
-      return await adminRoute(request, rc, ADMIN_AUTH, new URL(request.url));
+      return await adminRoute(request, rc, null, new URL(request.url));
     } catch (e) {
       const status = (e as { status?: number }).status;
       if (typeof status === "number") return Response.json({ error: (e as { code?: string }).code }, { status });

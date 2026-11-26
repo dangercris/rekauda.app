@@ -31,8 +31,6 @@ export interface SingleEnv extends BaseEnv {
   TENANCY: "single";
   ADMIN_PASSWORD: string;
   FORWARD_TO: string;
-  /** Signs the legacy admin cookie: required for the single-mode admin login until D1 sessions replace it. */
-  SESSION_SECRET?: string;
   ROOT_DOMAIN?: string;
   INBOUND_DOMAIN?: string;
   MAIL_ARCHIVE?: R2Bucket;

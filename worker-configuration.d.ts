@@ -10,7 +10,6 @@ interface __BaseEnv_Env {
 	IMAGES: ImagesBinding;
 	ASSETS: Fetcher;
 	ADMIN_PASSWORD: string;
-	SESSION_SECRET: string;
 	FORWARD_TO: string;
 }
 declare namespace Cloudflare {
@@ -24,7 +23,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "ADMIN_PASSWORD" | "SESSION_SECRET" | "FORWARD_TO">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "ADMIN_PASSWORD" | "FORWARD_TO">> {}
 }
 declare module "*.ttf" {
 	const value: ArrayBuffer;

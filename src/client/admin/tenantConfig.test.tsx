@@ -45,6 +45,25 @@ describe.each([
   });
 });
 
+describe("login screen follows config.auth.mode", () => {
+  it("password: shows the password form and the 7-day session note", async () => {
+    stub(tenantA, false);
+    render(<App />);
+    expect(await screen.findByLabelText("Contraseña")).toBeInTheDocument();
+    expect(screen.getByText(/La sesión dura 7 días/)).toBeInTheDocument();
+    expect(screen.queryByText(/6 horas/)).toBeNull();
+  });
+
+  it("magic_link: shows a neutral placeholder and no password form (magic links arrive in a later release)", async () => {
+    stub(tenantB, false);
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Ingreso con tu correo" })).toBeInTheDocument();
+    expect(screen.getByText(/Pronto podrás ingresar con tu correo/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Contraseña")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ingresar" })).toBeNull();
+  });
+});
+
 describe("admin app config failures", () => {
   it("renders the error state instead of the app when the config cannot load", async () => {
     vi.stubGlobal("fetch", mockApi({ "GET /api/config": () => json(500, { error: "x", message: "Error." }) }).fetch);

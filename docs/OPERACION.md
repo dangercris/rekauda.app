@@ -209,7 +209,8 @@ Los eventos nunca incluyen nombres, teléfonos, códigos de seguimiento ni monto
 | Síntoma | Qué revisar |
 | --- | --- |
 | No puedo entrar al panel | Contraseña (`ADMIN_PASSWORD`); tras 5 intentos fallidos en un minuto hay que esperar. Si ves "no está configurado", faltan secretos |
-| La sesión se cierra sola | Dura 6 horas; vuelve a ingresar |
+| La sesión se cierra sola | Dura 7 días desde que ingresas; vuelve a ingresar |
+| Cambié `ADMIN_PASSWORD` y quiero cerrar otras sesiones | Después de cambiarla, ingresa de nuevo con la clave nueva: eso cierra todas las demás sesiones abiertas |
 | La familia dice que el registro está cerrado | La recaudación está `cerrada`, o llegó al tope de 150 pagos activos |
 | Un pago llegó duplicado | Mira las banderas de comprobante o referencia repetida y anula el duplicado con nota |
 | No aparece el QR | Falta el archivo `public/deuna-qr.png` (no está en git) o `treasury.qrUrl` apunta a otro archivo, o está en `null` |

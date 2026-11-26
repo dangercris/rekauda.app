@@ -8,7 +8,7 @@ import styles from "./LoginView.module.css";
 /** Everything that is not the signed-in panel: checking, login form, setup notice, session check failure. */
 export function SessionGate({ session }: { session: SessionApi }) {
   const { state } = session;
-  const { classMark, classShortName } = useInstanceConfig();
+  const { classMark, classShortName, auth } = useInstanceConfig();
   return (
     <main className={styles.page}>
       <BrandPill mark={classMark} title="Tesorería" subtitle={classShortName} className={styles.brand} />
@@ -17,7 +17,8 @@ export function SessionGate({ session }: { session: SessionApi }) {
           <Spinner size={26} label="Verificando la sesión" />
         </div>
       )}
-      {state.status === "signedOut" && <LoginForm onLogin={session.login} notice={state.notice} />}
+      {state.status === "signedOut" &&
+        (auth.mode === "magic_link" ? <MagicLinkPlaceholder notice={state.notice} /> : <LoginForm onLogin={session.login} notice={state.notice} />)}
       {state.status === "disabled" && <SetupNotice message={state.message} onRetry={session.retry} />}
       {state.status === "error" && (
         <Card className={styles.card} gap={16}>
@@ -31,6 +32,19 @@ export function SessionGate({ session }: { session: SessionApi }) {
   );
 }
 
+/** Cloud accounts sign in with an emailed link, which is not available yet: no form, so nobody types a password here. */
+function MagicLinkPlaceholder({ notice }: { notice: string | null }) {
+  return (
+    <Card className={styles.card} gap={16}>
+      <div className={styles.heading}>
+        <h1 className={styles.title}>Ingreso con tu correo</h1>
+        <p className={styles.lead}>Pronto podrás ingresar con tu correo. Mientras tanto, esta página aún no permite el acceso.</p>
+      </div>
+      {notice && <Notice tone="warn" icon="clock" title={notice} live />}
+    </Card>
+  );
+}
+
 function SetupNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <Card className={styles.card} gap={16}>
@@ -39,9 +53,8 @@ function SetupNotice({ message, onRetry }: { message: string; onRetry: () => voi
         <p className={styles.lead}>{message}</p>
       </div>
       <InfoNote icon="settings">
-        Quien administra el sitio debe definir los secretos <code className={styles.code}>ADMIN_PASSWORD</code> y{" "}
-        <code className={styles.code}>SESSION_SECRET</code> del Worker (por ejemplo con <code className={styles.code}>wrangler secret put</code>) y
-        volver a cargar esta página.
+        Quien administra el sitio debe definir el secreto <code className={styles.code}>ADMIN_PASSWORD</code> del Worker (por ejemplo con{" "}
+        <code className={styles.code}>wrangler secret put</code>) y volver a cargar esta página.
       </InfoNote>
       <Button variant="glass" iconStart="refresh" onClick={onRetry}>
         Volver a comprobar
@@ -114,7 +127,7 @@ function LoginForm({ onLogin, notice }: { onLogin: (password: string) => Promise
           Ingresar
         </Button>
         <InfoNote icon="shield">
-          La sesión dura 6 horas en este dispositivo. Los comprobantes y teléfonos solo se ven aquí.
+          La sesión dura 7 días en este dispositivo. Los comprobantes y teléfonos solo se ven aquí.
         </InfoNote>
       </Card>
     </form>

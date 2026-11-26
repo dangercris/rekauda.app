@@ -88,7 +88,7 @@ Los comandos `dev`, `build`, `test`, `typecheck`, `types` y `deploy` ejecutan an
 Crea un archivo `.dev.vars` en la raíz (está en `.gitignore`) con valores de prueba. 🔐 Nunca pongas secretos reales en local.
 
 ```bash
-printf 'ADMIN_PASSWORD=clave-local\nSESSION_SECRET=%s\nFORWARD_TO=tesoreria@ejemplo.com\n' "$(openssl rand -hex 32)" > .dev.vars
+printf 'ADMIN_PASSWORD=clave-local\nFORWARD_TO=tesoreria@ejemplo.com\n' > .dev.vars
 ```
 
 ```bash

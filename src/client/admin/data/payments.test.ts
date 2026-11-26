@@ -63,6 +63,14 @@ describe("payment list helpers", () => {
     expect(nextInQueue([list[1]!], "p2", "recibido")).toBeNull();
   });
 
+  it("attributes reviews by an opaque user id to the treasury and Deuna reviews to automation", () => {
+    const byUser = makePayment({ id: "u1", status: "pagado", reviewedBy: "u0000000-0000-4000-8000-00000000000a", reviewedAt: "2026-11-26T18:00:00Z" });
+    const byDeuna = makePayment({ id: "d1", status: "recibido", reviewedBy: "deuna", reviewedAt: "2026-11-26T17:00:00Z" });
+    const feed = recentActivity([byUser, byDeuna], 4);
+    expect(feed.find((i) => i.paymentId === "u1" && i.kind === "pagado")?.actor).toBe("admin");
+    expect(feed.find((i) => i.paymentId === "d1" && i.kind === "recibido")?.actor).toBe("auto");
+  });
+
   it("builds the activity feed newest first", () => {
     const reviewed = makePayment({ id: "r1", status: "observado", reviewedBy: "admin", reviewedAt: "2026-11-26T18:00:00Z", reviewNote: "Monto incompleto" });
     const feed = recentActivity([reviewed, ...list], 3);

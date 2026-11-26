@@ -147,7 +147,7 @@ export function recentActivity(payments: readonly AdminPayment[], limit = 6): Ac
         id: `${p.id}:r`,
         paymentId: p.id,
         kind: p.status,
-        actor: p.reviewedBy === "admin" ? "admin" : "auto",
+        actor: p.reviewedBy && p.reviewedBy !== "deuna" ? "admin" : "auto",
         at: p.reviewedAt,
         name: studentNames(p),
         note: p.status === "observado" || p.status === "anulado" ? p.reviewNote : null,

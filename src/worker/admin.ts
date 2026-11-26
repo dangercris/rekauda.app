@@ -2,11 +2,15 @@ import type {
   AdminPayment,
   AdminPaymentStudent,
   AdminPaymentsResponse,
+  AdminSessionResponse,
   AdminStatusResponse,
+  OkResponse,
 } from "../shared/api";
 import { PAYMENT_STATUSES } from "../shared/api";
 import { adminListCollections, createCollection, mutationResponse, updateCollection } from "./admin-collections";
-import { assertSameOrigin, hasValidSession, isSafeMethod, login, logout, type AdminAuthConfig } from "./auth";
+import { assertSameOrigin, isSafeMethod } from "./auth/origin";
+import { passwordLogin, type PasswordLogin } from "./auth/password";
+import { SessionStore, clearSessionCookie } from "./auth/sessions";
 import { parseOptions } from "./collections";
 import type { RequestContext } from "./context";
 import { removeCover, setCover } from "./covers";
@@ -19,23 +23,34 @@ import { cleanText, countBy, normalize } from "./validation";
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const UUID_36 = /^[0-9a-f-]{36}$/;
 
-/** `auth` is null when this deployment has no admin login (Cloud before D1 sessions): every admin route answers 503. */
-export async function adminRoute(request: Request, rc: RequestContext, auth: AdminAuthConfig | null, url: URL): Promise<Response> {
-  if (!auth?.adminPassword || !auth.sessionSecret) {
-    throw new HttpError(503, "admin_disabled", "El acceso de administración no está configurado.");
-  }
+/**
+ * Admin gate: every route needs a D1 session of THIS tenant whose member holds a role here (owner or co_treasurer, both
+ * may review payments). `login` is the self-host password provider, null everywhere else (Cloud signs in with magic
+ * links). `now` is the session clock.
+ */
+export async function adminRoute(request: Request, rc: RequestContext, login: PasswordLogin | null, url: URL, now: () => number = Date.now): Promise<Response> {
+  const selfHost = rc.tenant.source === "self_host";
+  if (selfHost && !login) throw new HttpError(503, "admin_disabled", "El acceso de administración no está configurado.");
   const { pathname } = url;
   const method = request.method;
+  const sessions = new SessionStore(rc.db, now);
 
   // Every mutation (POST, DELETE...) must come from this origin, before anything else runs.
   if (!isSafeMethod(method)) assertSameOrigin(request, url);
 
-  if (pathname === "/api/admin/login" && method === "POST") return login(request, auth);
-  if (pathname === "/api/admin/logout" && method === "POST") return logout();
+  if (pathname === "/api/admin/login" && method === "POST") {
+    if (!selfHost || !login) throw new HttpError(404, "not_found", "Ruta no encontrada.");
+    return passwordLogin(request, rc, login, sessions);
+  }
+  if (pathname === "/api/admin/logout" && method === "POST") {
+    await sessions.revoke(request);
+    return json({ ok: true } satisfies OkResponse, 200, { "Set-Cookie": clearSessionCookie() });
+  }
 
-  if (!(await hasValidSession(request, auth))) throw new HttpError(401, "unauthorized", "Tu sesión expiró. Ingresa de nuevo.");
+  const identity = await sessions.resolve(request);
+  if (!identity) throw new HttpError(401, "unauthorized", "Tu sesión expiró. Ingresa de nuevo.");
 
-  if (pathname === "/api/admin/session" && method === "GET") return json({ ok: true });
+  if (pathname === "/api/admin/session" && method === "GET") return json({ ok: true, role: identity.role } satisfies AdminSessionResponse);
   if (pathname === "/api/admin/payments" && method === "GET") return listPayments(rc, url.searchParams.get("collection"));
   if (pathname === "/api/admin/collections" && method === "GET") return adminListCollections(rc);
   if (pathname === "/api/admin/collections" && method === "POST") return createCollection(request, rc);
@@ -67,7 +82,7 @@ export async function adminRoute(request: Request, rc: RequestContext, auth: Adm
   if (receiptId && method === "GET") return receipt(rc, receiptId);
 
   const statusId = new RegExp(`^/api/admin/payments/(${UUID})/status$`).exec(pathname)?.[1];
-  if (statusId && method === "POST") return updateStatus(request, rc, statusId);
+  if (statusId && method === "POST") return updateStatus(request, rc, statusId, identity.userId);
 
   throw new HttpError(404, "not_found", "Ruta no encontrada.");
 }
@@ -173,7 +188,7 @@ async function receipt({ db, storage }: RequestContext, id: string): Promise<Res
     ...BASE_HEADERS,
     "Content-Type": row.receipt_type,
     "Content-Disposition": `inline; filename="comprobante-${row.code}.${ext}"`,
-    "Cache-Control": "private, max-age=300",
+    "Cache-Control": "private, no-store",
   });
   if (row.receipt_type.startsWith("image/")) {
     headers.set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
@@ -185,7 +200,7 @@ async function receipt({ db, storage }: RequestContext, id: string): Promise<Res
   return new Response(object.body, { headers });
 }
 
-async function updateStatus(request: Request, { db }: RequestContext, id: string): Promise<Response> {
+async function updateStatus(request: Request, { db }: RequestContext, id: string, userId: string): Promise<Response> {
   const body = await readJson(request);
   const status = PAYMENT_STATUSES.find((s) => s === body.status);
   if (!status) throw new HttpError(400, "invalid_status", "Estado no válido.");
@@ -200,16 +215,16 @@ async function updateStatus(request: Request, { db }: RequestContext, id: string
       `UPDATE payments
           SET status = ?2,
               review_note = CASE WHEN ?3 != '' THEN ?3 ELSE review_note END,
-              reviewed_by = 'admin',
+              reviewed_by = ?6,
               reviewed_at = ?4,
               paid_at = CASE WHEN ?2 = 'pagado' THEN ?4 ELSE NULL END,
               updated_at = ?4
         WHERE tenant_id = ?1 AND id = ?5`,
     )
-    .bind(status, note, now, id)
+    .bind(status, note, now, id, userId)
     .run();
   if (!result.meta.changes) throw new HttpError(404, "not_found", "Registro no encontrado.");
 
-  console.log(JSON.stringify({ message: "status updated", id, status, by: "admin" }));
+  console.log(JSON.stringify({ message: "status updated", id, status, by: userId }));
   return json({ ok: true, status } satisfies AdminStatusResponse);
 }

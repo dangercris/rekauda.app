@@ -2,9 +2,9 @@
  * Two-tenant test harness: the seeded cloud database behind the SQL spy, a fake R2 bucket and one RequestContext per
  * tenant. Every handler test that goes through a RequestContext should end with spy.assertAllScoped(tenantId).
  */
-import { timingSafeEqual } from "node:crypto";
 import { adminRoute } from "../admin";
-import { hmac, type AdminAuthConfig } from "../auth";
+import type { PasswordLogin } from "../auth/password";
+import { SESSION_COOKIE, SessionStore } from "../auth/sessions";
 import { resolveInstance } from "../../shared/instance";
 import { parseInstanceConfig } from "../../shared/instance-validation";
 import { buildContext, type RequestContext } from "../context";
@@ -108,24 +108,16 @@ export type { RequestContext };
 
 // ---------------------------------------------------------------- admin calls
 
-// Workers expose crypto.subtle.timingSafeEqual, Node does not.
-if (!("timingSafeEqual" in crypto.subtle)) {
-  Object.defineProperty(crypto.subtle, "timingSafeEqual", {
-    value: (a: ArrayBuffer, b: ArrayBuffer) => timingSafeEqual(new Uint8Array(a), new Uint8Array(b)),
-  });
-}
-
 export const ORIGIN = "https://rekauda.test";
-export const ADMIN_AUTH: AdminAuthConfig = {
-  adminPassword: "pw",
-  sessionSecret: "test-session-secret",
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-  loginLimiter: { limit: async () => ({ success: true }) } as unknown as RateLimit,
-};
+/** The seeded owner of each tenant (scripts/cloud-seed.local.sql). */
+export const OWNER_A = "u0000000-0000-4000-8000-00000000000a";
+export const OWNER_B = "u0000000-0000-4000-8000-00000000000b";
+const OWNER_OF: Record<string, string> = { [TENANT_A]: OWNER_A, [TENANT_B]: OWNER_B };
 
-export async function adminCookie(): Promise<string> {
-  const exp = Math.floor(Date.now() / 1000) + 600;
-  return `adm=${exp}.${await hmac(ADMIN_AUTH.sessionSecret, `adm:${exp}`)}`;
+/** `__Host-rk_session=<token>` for a fresh session of `userId` (default: the tenant's seeded owner) in the tenant of `rc`. */
+export async function adminCookie(rc: RequestContext, userId: string = OWNER_OF[rc.tenant.id] ?? OWNER_A): Promise<string> {
+  const { token } = await new SessionStore(rc.db).create(userId);
+  return `${SESSION_COOKIE}=${token}`;
 }
 
 /** Calls the admin router for one tenant context. HttpErrors come back as `{ error }` responses, like in index.ts. */
@@ -134,15 +126,15 @@ export async function adminCall(
   method: string,
   path: string,
   body?: unknown,
-  options: { session?: boolean; origin?: string | null; auth?: AdminAuthConfig | null } = {},
+  options: { session?: boolean; cookie?: string; origin?: string | null; login?: PasswordLogin | null } = {},
 ): Promise<Response> {
   const headers = new Headers({ "content-type": "application/json" });
-  if (options.session !== false) headers.set("cookie", await adminCookie());
+  if (options.cookie) headers.set("cookie", options.cookie);
+  else if (options.session !== false) headers.set("cookie", await adminCookie(rc));
   if (options.origin !== null) headers.set("origin", options.origin ?? ORIGIN);
-  const request = new Request(`${ORIGIN}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  const auth = options.auth === undefined ? ADMIN_AUTH : options.auth;
+  const request = new Request(`${ORIGIN}${path}`, { method, headers, ...(body === undefined || method === "GET" ? {} : { body: JSON.stringify(body) }) });
   try {
-    return await adminRoute(request, rc, auth, new URL(request.url));
+    return await adminRoute(request, rc, options.login ?? null, new URL(request.url));
   } catch (e) {
     const status = (e as { status?: number }).status;
     if (typeof status === "number") return Response.json({ error: (e as { code?: string }).code }, { status });

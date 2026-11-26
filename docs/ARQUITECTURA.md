@@ -43,7 +43,7 @@ flowchart LR
 | Images | `IMAGES` | Recodifica la tarjeta de vista previa a JPEG |
 | Email Routing | Regla "Send to a Worker" | Entrega los correos de Deuna al handler `email()` |
 | Rate limiters | `SUBMIT_LIMITER`, `LOGIN_LIMITER`, `LOOKUP_LIMITER` | Límite por IP y por minuto |
-| Secretos | `ADMIN_PASSWORD`, `SESSION_SECRET`, `FORWARD_TO` | Ver `secrets.required` en `wrangler.jsonc` |
+| Secretos | `ADMIN_PASSWORD`, `FORWARD_TO` | Ver `secrets.required` en `wrangler.jsonc` |
 
 ### Tablas de D1
 
@@ -109,7 +109,7 @@ Protecciones de `POST /api/payments`: campo señuelo `hp_c9x` (los bots reciben 
 
 ## API de administración
 
-Todas bajo `/api/admin/*`. Si falta `ADMIN_PASSWORD` o `SESSION_SECRET` responde 503 `admin_disabled`. Las mutaciones (todo lo que no sea `GET`, `HEAD` u `OPTIONS`) exigen `Origin` igual al del sitio, antes que cualquier otra comprobación.
+Todas bajo `/api/admin/*`. Toda ruta exige una sesión válida de este sitio con un rol en él (`owner` o `co_treasurer`, ambos pueden revisar pagos); sin sesión responde 401. En autoalojamiento, si falta `ADMIN_PASSWORD` responde 503 `admin_disabled`. Las mutaciones (todo lo que no sea `GET`, `HEAD` u `OPTIONS`) exigen `Origin` igual al del sitio, antes que cualquier otra comprobación.
 
 | Método y ruta | Uso |
 | --- | --- |
@@ -128,7 +128,7 @@ Todas bajo `/api/admin/*`. Si falta `ADMIN_PASSWORD` o `SESSION_SECRET` responde
 | `POST /api/admin/movements/:id/unlink` | Desvincula; el pago conserva su estado |
 | `POST /api/admin/movements/:id/ignore` | Marca el movimiento como ignorado |
 
-La sesión es una cookie `adm` con `HttpOnly`, `Secure`, `SameSite=Strict` y `Path=/api/admin`, que contiene la expiración y una firma HMAC-SHA256 con `SESSION_SECRET`. Dura 6 horas. La contraseña se compara con una función de tiempo constante.
+La sesión es una cookie `__Host-rk_session` (`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, sin `Domain`) con un token aleatorio de 256 bits. En D1 solo se guarda su hash SHA-256 en `sessions`, junto con el sitio y el usuario; una sesión de un sitio no vale en otro aunque se copie la cookie. Dura 7 días desde el ingreso (no se renueva con el uso) y `POST /api/admin/logout` borra la fila. En autoalojamiento `POST /api/admin/login` compara `ADMIN_PASSWORD` en tiempo constante (con límite de intentos) y abre una sesión para el propietario sintético; en Cloud ese endpoint no existe y el ingreso será con enlace al correo.
 
 ## Vistas previas para compartir (OG)
 
@@ -209,7 +209,7 @@ Los motivos y eventos de registro están en [CORREO-DEUNA.md](CORREO-DEUNA.md#so
 | Amenaza | Mitigación |
 | --- | --- |
 | Correo falso que simula ser Deuna | Firma DKIM de `deunaapp.com` obligatoria, remitente exacto, dirección de entrada secreta, y la automatización nunca marca `pagado` |
-| Acceso al panel por fuerza bruta | Límite de 5 intentos por minuto por IP, comparación en tiempo constante, sesión de 6 horas |
+| Acceso al panel por fuerza bruta | Límite de 5 intentos por minuto por IP, comparación en tiempo constante, sesión de 7 días con token hasheado en D1 |
 | Petición entre sitios al panel (CSRF) | Cookie `SameSite=Strict` y `Origin` obligatorio en toda mutación |
 | Subida de archivos maliciosos | Tipo por bytes iniciales, máximo 5 MB, comprobantes servidos con CSP `sandbox` y los PDF como descarga |
 | Filtración de comprobantes | Bucket privado, lectura solo con sesión; la ruta pública de portadas valida contra D1 |
