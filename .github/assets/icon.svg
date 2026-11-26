@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-label="Ícono de Rekauda">
+  <title>Rekauda</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E4E8F0"/></linearGradient>
+  </defs>
+  <rect width="180" height="180" rx="41" fill="url(#g)"/>
+  <rect x="0.5" y="0.5" width="179" height="179" rx="40.5" fill="none" stroke="#0E1117" stroke-opacity="0.06"/>
+  <g transform="translate(36 36) scale(1.08)">
+  <g style="isolation:isolate" fill="none" stroke-linecap="round" stroke-width="20">
+    <line x1="29" y1="19" x2="29" y2="81" stroke="#2D5BFF" style="mix-blend-mode:multiply"/>
+    <line x1="39" y1="53" x2="71" y2="19" stroke="#FF6A4D" style="mix-blend-mode:multiply"/>
+    <line x1="47" y1="46" x2="74" y2="81" stroke="#14B8A6" style="mix-blend-mode:multiply"/>
+  </g>
+  </g>
+</svg>

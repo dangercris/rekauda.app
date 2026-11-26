@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Símbolo de Rekauda">
+  <title>Rekauda</title>
+  <g style="isolation:isolate" fill="none" stroke-linecap="round" stroke-width="20">
+    <line x1="29" y1="19" x2="29" y2="81" stroke="#2D5BFF" style="mix-blend-mode:multiply"/>
+    <line x1="39" y1="53" x2="71" y2="19" stroke="#FF6A4D" style="mix-blend-mode:multiply"/>
+    <line x1="47" y1="46" x2="74" y2="81" stroke="#14B8A6" style="mix-blend-mode:multiply"/>
+  </g>
+</svg>
