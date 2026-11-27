@@ -60,11 +60,15 @@ const prodNames = Object.keys(scripts).filter((name) => name.startsWith("prod:")
 
 describe("prod:* scripts", () => {
   it("defines the expected production scripts", () => {
-    expect(prodNames.sort()).toEqual(["prod:deploy", "prod:guard", "prod:migrate", "prod:status", "prod:switch-apex"]);
+    expect(prodNames.sort()).toEqual(["prod:deploy", "prod:guard", "prod:import", "prod:migrate", "prod:status", "prod:switch-apex"]);
   });
 
   it("prod:guard runs the production guard", () => {
     expect(scripts["prod:guard"]).toBe("node scripts/cloud-guard.mjs --production");
+  });
+
+  it("prod:import goes through the wrapper and hardcodes no argument (the workdir, tenant id and slug come from the owner)", () => {
+    expect(scripts["prod:import"]).toBe("node scripts/cloud-wrangler.mjs prod:import");
   });
 
   it.each(["migrate", "deploy", "switch-apex", "status"])("prod:%s goes through the wrapper subcommand of the same name, with no flags", (name) => {

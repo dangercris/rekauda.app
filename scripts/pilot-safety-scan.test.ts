@@ -48,6 +48,8 @@ describe("the only path to --remote", () => {
   const REMOTE_FUNCTIONS = [
     { fn: "function runSandbox", config: "SANDBOX_CONFIG" },
     { fn: "function runProduction", config: "PRODUCTION_CONFIG" },
+    // The remote of the production data commands (import, validation, undo): see "the production data path" below.
+    { fn: "function productionRemote", config: "PRODUCTION_CONFIG" },
   ];
   const bodyOf = (fn: string) => {
     const from = wrapper.indexOf(fn);
@@ -121,6 +123,41 @@ describe("the pilot export path (read-only)", () => {
   it("contains no write, schema or pragma statement and no other wrangler family", () => {
     expect(code.join("\n")).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/i);
     expect(code.join("\n")).not.toMatch(/"(r2|secret|deploy|delete|kv|versions|migrations|--file|--local)"/);
+  });
+});
+
+describe("the production data path (reads and the import file)", () => {
+  const wrapper = sources.find((s) => s.name === "lib/cloud-wrangler-core.mjs")!.text;
+  const from = wrapper.indexOf("function productionRemote");
+  const remote = wrapper.slice(from, wrapper.indexOf("\n}\n", from));
+  const code = (text: string) => text.split("\n").filter((l) => !l.trimStart().startsWith("//"));
+
+  it("has one spawn, one fixed argv with the production config, and only the --command and --file flags", () => {
+    expect(code(remote).filter((l) => /\bspawn\(/.test(l))).toHaveLength(1);
+    const argv = code(remote).filter((l) => l.includes('"--remote"'));
+    expect(argv).toHaveLength(1);
+    expect(argv[0]).toContain('["d1", "execute", "DB", "--remote", "--json", ...PRODUCTION_CONFIG, flag, value]');
+    expect([...remote.matchAll(/invoke\("(--[a-z]+)"/g)].map((m) => m[1]).sort()).toEqual(["--command", "--file"]);
+    expect(remote).not.toMatch(/\bshell\s*:|stdio: "inherit"|stdio: \[[^\]]*"inherit"/);
+  });
+
+  it("select accepts one SELECT statement only, and file only import.sql", () => {
+    expect(remote).toContain('!sql.startsWith("SELECT ") || !sql.endsWith(";") || sql.slice(0, -1).includes(";")');
+    expect(remote).toContain('basename(path) !== "import.sql"');
+  });
+
+  // Every remote.<method>( call site in the import modules, and nothing else may reach the remote.
+  const ALLOWED = { "lib/import/target.mjs": ["select", "select", "select"], "lib/import/apply.mjs": ["file"] } as Record<string, string[]>;
+  const importSources = sources.filter((s) => s.name.startsWith("lib/import/"));
+  it("only target.mjs reads and only apply.mjs executes, at exactly the allowed call sites", () => {
+    const found = Object.fromEntries(importSources.map((s) => [s.name, [...code(s.text).join("\n").matchAll(/\bremote\.(\w+)\(/g)].map((m) => m[1])]).filter(([, calls]) => (calls as string[]).length > 0));
+    expect(found).toEqual(ALLOWED);
+  });
+
+  it("every select call site sends a SELECT built from constants and validated ids, and target.mjs has no write statement", () => {
+    const target = sources.find((s) => s.name === "lib/import/target.mjs")!.text;
+    for (const line of code(target).filter((l) => l.includes("remote.select("))) expect(line).toMatch(/remote\.select\((`SELECT |sql\))/);
+    expect(code(target).join("\n")).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/i);
   });
 });
 

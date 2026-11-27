@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -136,5 +137,22 @@ describe("import modules stay local", () => {
   it("has the modules", () => expect(sources.length).toBeGreaterThanOrEqual(8));
   it.each(sources)("$f has no wrangler, network or process spawning", ({ text }) => {
     expect(text).not.toMatch(/wrangler|--remote|child_process|node:https?|node:net|fetch\s*\(/);
+  });
+});
+
+describe("the plan record in the manifest", () => {
+  it("records the file hash, tenant and export it was built from", () => {
+    const { dir, run } = setup();
+    expect(run(dir, TENANT_ID)).toBe(0);
+    const { plan, exports } = readManifest(dir);
+    expect(plan).toEqual({ file: "import.sql", sha256: createHash("sha256").update(readFileSync(join(dir, "import.sql"))).digest("hex"), tenantId: TENANT_ID, exportFile: "export-2.json", exportHash: exports[1].hash });
+  });
+
+  it("drops the record when a later run refuses", () => {
+    const { dir, run } = setup();
+    expect(run(dir, TENANT_ID)).toBe(0);
+    writeManifest(dir, { ...readManifest(dir), mismatchSeen: true });
+    expect(run(dir, TENANT_ID)).toBe(1);
+    expect(readManifest(dir).plan).toBeUndefined();
   });
 });
