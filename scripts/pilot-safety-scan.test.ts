@@ -148,16 +148,18 @@ describe("the production data path (reads and the import file)", () => {
     expect(remote).toContain('basename(path) !== "import.sql"');
   });
 
-  it("mutate accepts one DELETE statement only", () => {
-    expect(remote).toContain('!/^DELETE FROM [a-z_]+ WHERE /.test(sql) || !sql.endsWith(";") || sql.slice(0, -1).includes(";")');
+  it("mutate accepts one scoped DELETE only: allowed table, a tenant UUID and the pilot_import guard", () => {
+    expect(remote).toContain("!MUTABLE.test(sql) || !sql.includes(\" source = 'pilot_import'\") || !UUID_LITERAL.test(sql) || !sql.endsWith(\";\") || sql.slice(0, -1).includes(\";\")");
+    expect(wrapper).toMatch(/const MUTABLE = \/\^DELETE FROM \(bank_movements\|students\|payments\|collections\|sessions\|magic_links\|memberships\|users\|tenant_domains\|tenants\) WHERE \//);
   });
+
 
   // Every remote.<method>( call site in the import modules, and nothing else may reach the remote.
   const ALLOWED = {
     "lib/import/target.mjs": ["select", "select", "select"],
     "lib/import/apply.mjs": ["file"],
     "lib/import/validate.mjs": ["select"],
-    "lib/import/undo.mjs": ["select", "mutate"],
+    "lib/import/undo.mjs": ["select", "select", "mutate", "select"],
   } as Record<string, string[]>;
   const importSources = sources.filter((s) => s.name.startsWith("lib/import/"));
   it("only these modules reach the remote, at exactly the allowed call sites", () => {
@@ -176,12 +178,32 @@ describe("the production data path (reads and the import file)", () => {
     }
   });
 
-  it("the only DELETE statements live in undo.mjs, each scoped by tenant_id or by the tenant id with the pilot_import source", () => {
+  // Every DELETE line must carry the pilot_import guard (a shared GUARD helper or the literal), and a user delete must also
+  // carry the other-membership clause. The checker itself is proven by fixtures with a guard removed.
+  const deleteProblems = (line: string): string[] => {
+    const problems: string[] = [];
+    if (!line.includes("source = 'pilot_import'") && !line.includes("${GUARD(")) problems.push("no pilot_import guard");
+    if (!/WHERE (tenant_id|id) = '\$\{(id|tenantId|u)\}'/.test(line)) problems.push("not scoped");
+    if (line.includes("DELETE FROM users") && !line.includes("NOT EXISTS (SELECT 1 FROM memberships WHERE user_id = '${u}')")) problems.push("no other-membership clause");
+    return problems;
+  };
+
+  it("the only DELETE statements live in undo.mjs, and every one carries its guards", () => {
     for (const s of importSources.filter((i) => !i.name.endsWith("undo.mjs"))) expect(code(s.text).join("\n"), s.name).not.toMatch(/\bDELETE\b/);
-    const undo = code(sources.find((s) => s.name === "lib/import/undo.mjs")!.text).filter((l) => /DELETE FROM/.test(l));
-    expect(undo.length).toBeGreaterThan(0);
-    for (const line of undo) expect(line).toMatch(/WHERE (tenant_id|id) = '\$\{(id|tenantId)\}'|WHERE id = '\$\{u\}'/);
+    const lines = code(sources.find((s) => s.name === "lib/import/undo.mjs")!.text).filter((l) => /DELETE FROM/.test(l));
+    expect(lines.length).toBe(3);
+    for (const line of lines) expect(deleteProblems(line), line).toEqual([]);
   });
+
+  it("the DELETE checker fails when a guard is removed from a line", () => {
+    const good = "const users = `DELETE FROM users WHERE id = '${u}' AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id = '${u}') AND ${GUARD(tenantId)};`;";
+    expect(deleteProblems(good)).toEqual([]);
+    expect(deleteProblems(good.replace(" AND ${GUARD(tenantId)}", ""))).toContain("no pilot_import guard");
+    expect(deleteProblems(good.replace(" AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id = '${u}')", ""))).toContain("no other-membership clause");
+    expect(deleteProblems("`DELETE FROM payments WHERE 1 = 1 AND ${GUARD(id)};`")).toContain("not scoped");
+    expect(deleteProblems("`DELETE FROM tenants WHERE id = '${tenantId}';`")).toContain("no pilot_import guard");
+  });
+
 });
 
 describe("the remote is used only in its plain form, in every module the data commands import", () => {

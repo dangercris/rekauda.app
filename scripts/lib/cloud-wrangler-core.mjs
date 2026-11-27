@@ -151,6 +151,10 @@ function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confir
   return run([{ bin: viteBin, argv: ["build"] }, wrangler("deploy", ...PRODUCTION_CONFIG)]);
 }
 
+// What `mutate` accepts: one DELETE on a tenant table, naming a tenant UUID and the pilot_import source guard.
+const MUTABLE = /^DELETE FROM (bank_movements|students|payments|collections|sessions|magic_links|memberships|users|tenant_domains|tenants) WHERE /;
+const UUID_LITERAL = /'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'/;
+
 /**
  * The remote of the production data commands: `select` runs ONE SELECT, `mutate` ONE scoped DELETE (the undo), `file` runs the plan file, all as the fixed argv
  * against the fixed production config. The guard runs again before every spawn and the config must be unchanged. stdout and
@@ -175,7 +179,7 @@ export function productionRemote({ root, bin, spawn, env, log, checkFn, target, 
       return entry.results;
     },
     mutate(sql) {
-      if (!/^DELETE FROM [a-z_]+ WHERE /.test(sql) || !sql.endsWith(";") || sql.slice(0, -1).includes(";")) throw new Error("not a single DELETE");
+      if (!MUTABLE.test(sql) || !sql.includes(" source = 'pilot_import'") || !UUID_LITERAL.test(sql) || !sql.endsWith(";") || sql.slice(0, -1).includes(";")) throw new Error("not a single scoped DELETE");
       invoke("--command", sql);
     },
     file(path) {

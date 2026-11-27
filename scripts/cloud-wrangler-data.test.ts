@@ -187,7 +187,7 @@ describe("prod:validate, prod:undo-data and prod:undo-tenant through the wrapper
     ["prod:undo-tenant", "UNDO TENANT", ["bank_movements", "students", "payments", "collections", "sessions", "magic_links", "memberships", "tenant_domains", "tenants"]],
   ])("%s asks %s <slug>, then runs only single DELETE statements for the tenant", (sub, phrase, order) => {
     const w = withRows();
-    expect(w.run(sub, [TENANT_ID, SLUG], `${phrase} ${SLUG}`)).toBe(0);
+    expect(w.run(sub, [w.dir, TENANT_ID, SLUG], `${phrase} ${SLUG}`)).toBe(0);
     expect(w.asked).toEqual([`${phrase} ${SLUG}`]);
     const deletes = w.calls.filter((c) => c.argv[8]?.startsWith("DELETE"));
     expect(deletes.map((c) => /^DELETE FROM (\w+)/.exec(c.argv[8]!)![1])).toEqual(order);
@@ -200,22 +200,30 @@ describe("prod:validate, prod:undo-data and prod:undo-tenant through the wrapper
     expect(w.count("payments")).toBe(0);
   });
 
-  it.each(["prod:undo-data", "prod:undo-tenant"])("%s refuses a workdir argument, wrong phrase, no terminal and bad ids, spawning nothing", (sub) => {
+  it.each(["prod:undo-data", "prod:undo-tenant"])("%s needs the workdir, the exact phrase, a terminal and valid ids, spawning nothing otherwise", (sub) => {
     const w = withRows();
-    expect(w.run(sub, [w.dir, TENANT_ID, SLUG], "x")).toBe(1);
-    expect(w.run(sub, [TENANT_ID, "Bad Slug"], "x")).toBe(1);
-    expect(w.run(sub, ["nope", SLUG], "x")).toBe(1);
-    expect(w.run(sub, [TENANT_ID, SLUG], "UNDO DATA other-demo")).toBe(1);
+    expect(w.run(sub, [TENANT_ID, SLUG], "x")).toBe(1);
+    expect(w.run(sub, [w.dir, TENANT_ID, "Bad Slug"], "x")).toBe(1);
+    expect(w.run(sub, ["nope", TENANT_ID, SLUG], "x")).toBe(1);
+    expect(w.run(sub, [w.dir, TENANT_ID, SLUG], "UNDO DATA other-demo")).toBe(1);
     w.state.tty = false;
-    expect(w.run(sub, [TENANT_ID, SLUG], `UNDO DATA ${SLUG}`)).toBe(1);
+    expect(w.run(sub, [w.dir, TENANT_ID, SLUG], `UNDO DATA ${SLUG}`)).toBe(1);
     expect(w.calls).toEqual([]);
+    expect(w.count("payments")).toBe(3);
+  });
+
+  it("an undo after parents created new data is refused and deletes nothing", () => {
+    const w = withRows();
+    w.addCollection(TENANT_ID, "created-later", "nuevo-demo");
+    expect(w.run("prod:undo-data", [w.dir, TENANT_ID, SLUG], `UNDO DATA ${SLUG}`)).toBe(1);
+    expect(w.calls.some((c) => c.argv[8]?.startsWith("DELETE"))).toBe(false);
     expect(w.count("payments")).toBe(3);
   });
 
   it("the typed phrases are not interchangeable between data, tenant and import", () => {
     const w = withRows();
-    expect(w.run("prod:undo-tenant", [TENANT_ID, SLUG], `UNDO DATA ${SLUG}`)).toBe(1);
-    expect(w.run("prod:undo-data", [TENANT_ID, SLUG], `IMPORT ${SLUG}`)).toBe(1);
+    expect(w.run("prod:undo-tenant", [w.dir, TENANT_ID, SLUG], `UNDO DATA ${SLUG}`)).toBe(1);
+    expect(w.run("prod:undo-data", [w.dir, TENANT_ID, SLUG], `IMPORT ${SLUG}`)).toBe(1);
     expect(w.calls).toEqual([]);
   });
 });
@@ -224,5 +232,32 @@ describe("productionRemote hands out only the methods it is asked for", () => {
   const make = (methods: string[]) => productionRemote({ root: "/x/", bin: "w", spawn: () => ({ status: 1 }), env: {}, log: console, checkFn: () => ({ result: { ok: true, warnings: [], violations: [] }, target: {} }), target: {}, methods });
   it.each([[["select", "file"]], [["select"]], [["select", "mutate"]]])("%j", (methods) => {
     expect(Object.keys(make(methods)).sort()).toEqual([...methods].sort());
+  });
+});
+
+describe("mutate enforces the scoping at the chokepoint", () => {
+  const UUID_A = "c0000000-0000-4000-8000-0000000000c1";
+  const ok = `DELETE FROM payments WHERE tenant_id = '${UUID_A}' AND EXISTS (SELECT 1 FROM tenants WHERE id = '${UUID_A}' AND source = 'pilot_import');`;
+  const run = (sql: string) => {
+    const seen: string[][] = [];
+    const remote = productionRemote({ root: "/x/", bin: "w", spawn: (_b: string, argv: string[]) => (seen.push(argv), { status: 0, stdout: "[]" }), env: {}, log: console, checkFn: () => ({ result: { ok: true, warnings: [], violations: [] }, target: {} }), target: {}, methods: ["mutate"] });
+    return { call: () => remote.mutate(sql), seen };
+  };
+  it("sends a scoped DELETE", () => {
+    const { call, seen } = run(ok);
+    call();
+    expect(seen).toHaveLength(1);
+  });
+  it.each([
+    ["no scope", "DELETE FROM tenants WHERE 1=1;"],
+    ["no UUID literal", "DELETE FROM payments WHERE tenant_id = 'x' AND source = 'pilot_import';"],
+    ["no pilot_import guard", `DELETE FROM payments WHERE tenant_id = '${UUID_A}';`],
+    ["a table that is not allowed", ok.replace("payments", "sqlite_master")],
+    ["two statements", ok + " " + ok],
+    ["an UPDATE", ok.replace("DELETE FROM", "UPDATE")],
+  ])("refuses %s without spawning", (_n, sql) => {
+    const { call, seen } = run(sql);
+    expect(call).toThrow();
+    expect(seen).toEqual([]);
   });
 });
