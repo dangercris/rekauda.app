@@ -71,6 +71,12 @@ describe("payment list helpers", () => {
     expect(feed.find((i) => i.paymentId === "d1" && i.kind === "recibido")?.actor).toBe("auto");
   });
 
+  it("attributes script reviews (imported rows) to automation, matching the reviewer label", () => {
+    const byScript = makePayment({ id: "s1", status: "pagado", reviewedBy: "script", reviewedAt: "2026-11-26T16:00:00Z" });
+    const feed = recentActivity([byScript], 4);
+    expect(feed.find((i) => i.paymentId === "s1" && i.kind === "pagado")?.actor).toBe("auto");
+  });
+
   it("builds the activity feed newest first", () => {
     const reviewed = makePayment({ id: "r1", status: "observado", reviewedBy: "admin", reviewedAt: "2026-11-26T18:00:00Z", reviewNote: "Monto incompleto" });
     const feed = recentActivity([reviewed, ...list], 3);

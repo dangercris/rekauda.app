@@ -4,6 +4,7 @@
  */
 import type { AdminPayment, PaymentStatus } from "../../../shared/api";
 import { MONTHS_SHORT, WEEKDAYS_SHORT, daysUntil, ecParts, normalizeSearch, parseInstant, todayEc } from "../../lib/format";
+import { isTreasuryReviewer } from "../reviewer-label";
 import type { StatusFilter } from "../routes";
 
 export type StatusCounts = Record<StatusFilter, number>;
@@ -147,7 +148,7 @@ export function recentActivity(payments: readonly AdminPayment[], limit = 6): Ac
         id: `${p.id}:r`,
         paymentId: p.id,
         kind: p.status,
-        actor: p.reviewedBy && p.reviewedBy !== "deuna" ? "admin" : "auto",
+        actor: isTreasuryReviewer(p.reviewedBy) ? "admin" : "auto",
         at: p.reviewedAt,
         name: studentNames(p),
         note: p.status === "observado" || p.status === "anulado" ? p.reviewNote : null,
