@@ -128,11 +128,22 @@ describe("docs/MIGRACION-PILOTO.md", () => {
     expect(manual.slice(0, manual.indexOf("Ejecuta una a una"))).toMatch(/REUSE OWNER[\s\S]*no la borres/i);
   });
 
+  it("does not rely on the manifest alone to protect a reused owner: noted at provisioning, and a created_at comparison in D1", () => {
+    const text = read("docs/MIGRACION-PILOTO.md");
+    const provision = text.slice(text.indexOf("`pnpm prod:provision <workdir>` valida"));
+    expect(provision.slice(0, provision.indexOf("\n"))).toMatch(/reusedOwnerId=/);
+    const manual = text.slice(text.indexOf("Lee los usuarios **antes**"));
+    const step = manual.slice(0, manual.indexOf("Verifica: repite"));
+    expect(step).toMatch(/u\.created_at/);
+    expect(step).toMatch(/t\.created_at/);
+    expect(step).toMatch(/antes que el tenant[\s\S]*nunca/i);
+  });
+
   it("has a not-live check before the manual deletes and a Time Travel bookmark", () => {
     const manual = runbook.slice(runbook.indexOf("DELETE FROM bank_movements") - 3500, runbook.indexOf("DELETE FROM bank_movements"));
     expect(manual).toMatch(/SELECT COUNT\(\*\)/);
     expect(manual).toMatch(/Time Travel/);
-    expect(runbook).toMatch(/SELECT user_id FROM memberships WHERE tenant_id = '<tenant-id>'/);
+    expect(runbook).toMatch(/FROM memberships m JOIN users u[^\n]*WHERE m\.tenant_id = '<tenant-id>'/);
   });
 
   it("puts each typed phrase in the same section as its command", () => {

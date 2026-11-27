@@ -165,7 +165,7 @@ El piloto sigue sirviendo el apex. Cloud sirve `<slug-del-curso>.<dominio-raiz>`
    ```
 
    Reglas: solo esas cuatro claves, `slug` válido y no reservado, `ownerEmail` ASCII imprimible sin `;`, `config` con la forma de `rekauda.config.example.ts`, `qrPath` **absoluta y canónica** (sin enlaces simbólicos en el camino; en macOS es la ruta real `/private/var/...`, no `/var/...`) a un PNG, JPG o WebP de 1 byte a 1 MB. Verifica: `chmod 600 <workdir>/tenant.json` y que `realpath <qrPath>` sea igual a `qrPath`.
-3. Responsable: dueño. Cambia al token de producción y lee la línea `worker=... account=... root=...`. `pnpm prod:provision <workdir>` valida `tenant.json` y el QR antes de pedir la frase y pide `PROVISION <slug-del-curso>`. Si el correo del propietario ya es una cuenta de una persona, pide `PROVISION <slug-del-curso> REUSE OWNER` (esa cuenta pasa a ser propietaria del tenant nuevo; su id queda en `manifest.json` como `tenant.reusedOwnerId` y `prod:undo-tenant` nunca la borra). Si es una cuenta de sistema, se niega. Verifica: imprime `provisioned` y la ruta de `<workdir>/handover.txt` (modo 0600, con la dirección de entrada `d-<token>@in.<dominio-raiz>`; el token nunca se imprime). Anota el `tenant=<id>` impreso: también está en `<workdir>/manifest.json`. Verifica el QR (sección 5, punto 8).
+3. Responsable: dueño. Cambia al token de producción y lee la línea `worker=... account=... root=...`. `pnpm prod:provision <workdir>` valida `tenant.json` y el QR antes de pedir la frase y pide `PROVISION <slug-del-curso>`. Si el correo del propietario ya es una cuenta de una persona, pide `PROVISION <slug-del-curso> REUSE OWNER` (esa cuenta pasa a ser propietaria del tenant nuevo; su id queda en `manifest.json` como `tenant.reusedOwnerId` y `prod:undo-tenant` nunca la borra). Si es una cuenta de sistema, se niega. Verifica: imprime `provisioned` y la ruta de `<workdir>/handover.txt` (modo 0600, con la dirección de entrada `d-<token>@in.<dominio-raiz>`; el token nunca se imprime). Anota el `tenant=<id>` impreso: también está en `<workdir>/manifest.json`. Si usaste `REUSE OWNER`, la línea de éxito también imprime `reusedOwnerId=<id>` (un id de usuario, nunca un correo): anótalo junto al `tenant=<id>`, porque el borrado manual del apartado 5 lo necesita si el workdir se pierde. Verifica el QR (sección 5, punto 8).
 4. Responsable: dueño. T-0, con el token de lectura: `pnpm pilot:export <workdir>` (frase `EXPORT PILOT READ-ONLY`). Verifica: `vs first export: MATCH` (salida 0). Un **MISMATCH** sale con código 3 y es **pegajoso**: aunque un export posterior vuelva a coincidir, ese workdir queda bloqueado para siempre. Recuperación:
    1. `pnpm pilot:export` **sin argumento** (frase `EXPORT PILOT READ-ONLY`) crea un workdir nuevo. Repetir el export en el mismo no sirve.
    2. Deshaz el tenant del workdir viejo: `pnpm prod:undo-tenant <workdir-viejo> <tenant-id> <slug-del-curso>` (frase `UNDO TENANT <slug-del-curso>`). Si no se importó nada, se permite sin plan porque el tenant tiene cero filas de datos.
@@ -257,13 +257,15 @@ Todo deshacer solo vale con el import **sin estar en vivo**: necesita el plan de
 
       El tenant debe tener `source = 'pilot_import'` y el slug esperado.
    2. En el panel de D1, anota el bookmark de **Time Travel** actual: permite restaurar si algo se borra por error.
-   3. Lee los usuarios **antes** de borrar las membresías, uno por cada miembro (propietario y cotesoreros), y anota los ids. Si el tenant se provisionó con `REUSE OWNER` (el id está en `tenant.reusedOwnerId` de `<workdir>/manifest.json`), **no la borres**: omite esa cuenta, que existía antes del tenant.
+   3. Lee los usuarios **antes** de borrar las membresías, con la fecha de creación de cada uno y la del tenant, y anota los ids:
 
       ```sql
-      SELECT user_id FROM memberships WHERE tenant_id = '<tenant-id>';
+      SELECT m.user_id, u.created_at AS user_created_at, t.created_at AS tenant_created_at FROM memberships m JOIN users u ON u.id = m.user_id JOIN tenants t ON t.id = m.tenant_id WHERE m.tenant_id = '<tenant-id>';
       ```
 
-   4. Ejecuta una a una, en este orden exacto, las sentencias de abajo (cambia `<tenant-id>` y repite la línea de `users` con cada `<user-id>` anotado). Para quitar solo los datos y conservar el tenant, ejecuta únicamente las cuatro primeras.
+      Un usuario creado **antes que el tenant** (`user_created_at` menor que `tenant_created_at`) ya existía: es la cuenta reutilizada con `REUSE OWNER`: no la borres nunca, aunque no tenga otra membresía. Esta comparación vale aunque el manifiesto y la nota de provisión se hayan perdido. Si además tienes `tenant.reusedOwnerId` (de `<workdir>/manifest.json` o de la línea de éxito de `prod:provision`), omite también ese id. Solo se borran los usuarios creados junto con el tenant.
+
+   4. Ejecuta una a una, en este orden exacto, las sentencias de abajo (cambia `<tenant-id>` y repite la línea de `users` solo con cada `<user-id>` creado junto con el tenant, nunca con uno creado antes). Para quitar solo los datos y conservar el tenant, ejecuta únicamente las cuatro primeras.
 
       ```sql
       DELETE FROM bank_movements WHERE tenant_id = '<tenant-id>' AND EXISTS (SELECT 1 FROM tenants WHERE id = '<tenant-id>' AND source = 'pilot_import');
