@@ -528,3 +528,28 @@ describe("confirmTyped", () => {
     expect(out.join("")).not.toContain("go\n");
   });
 });
+
+describe("cloud-wrangler: pilot subcommands", () => {
+  const pilotFiles = { "wrangler.jsonc": JSON.stringify({ name: "fixture-pilot", account_id: "acct-fixture-0001", d1_databases: [{ database_name: "fixture-pilot-db", database_id: "11111111-aaaa-bbbb-cccc-222222222222" }], r2_buckets: [{ bucket_name: "fixture-pilot-bucket" }] }) };
+  const attempt = (args: string[], typed?: string) => {
+    const { root, calls } = setup(pilotFiles);
+    const errors: string[] = [];
+    const log = { error: (m: string) => errors.push(String(m)), warn: () => undefined, log: () => undefined };
+    const status = runCloudWrangler(args, { root: root + "/", bin: "w", viteBin: "v", spawn: (bin: string, argv: string[]) => (calls.push({ bin, argv, cwd: "" }), { status: 1, stdout: "" }), log, env: {}, confirm: (p: string) => p === typed }) as number;
+    return { status, calls, errors };
+  };
+
+  it("pilot:export reaches the export module: the fixed batch only after the phrase", () => {
+    expect(attempt(["pilot:export"], "nope").calls).toEqual([]);
+    const { calls } = attempt(["pilot:export"], "EXPORT PILOT READ-ONLY");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.argv.slice(0, 2)).toEqual(["d1", "execute"]);
+    expect(calls[0]!.argv).toContain("--remote");
+  });
+
+  it.each([["pilot:export", "--command", "x"], ["pilot:cleanup"], ["pilot:cleanup", "--all"]])("%s with bad args never reaches wrangler", (...args) => {
+    const { status, calls } = attempt(args, "EXPORT PILOT READ-ONLY");
+    expect(status).toBe(1);
+    expect(calls).toEqual([]);
+  });
+});

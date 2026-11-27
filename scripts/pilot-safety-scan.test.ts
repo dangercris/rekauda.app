@@ -14,8 +14,13 @@ const sources = files(dir)
 
 // The only files allowed to mention the flag: the guard and the wrapper, which exist to REJECT it.
 const WRAPPER_FILES = ["cloud-wrangler.mjs", "lib/cloud-wrangler-core.mjs"];
-const MENTIONS_REMOTE_FLAG = ["cloud-guard.mjs", ...WRAPPER_FILES];
+const EXPORT_FILE = "lib/pilot-export.mjs";
+const MENTIONS_REMOTE_FLAG = ["cloud-guard.mjs", ...WRAPPER_FILES, EXPORT_FILE];
 const INVOKES_WRANGLER = /bin\/wrangler|\bwrangler\s+(d1|dev|deploy|r2|secret|types|versions|kv|delete)\b/;
+
+// Every way of starting a process. Only the wrapper and the pilot export may do it (a lookbehind skips RegExp#exec).
+const SPAWNS = /(?<![.\w])(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\(/;
+const MAY_SPAWN = [...WRAPPER_FILES, EXPORT_FILE];
 
 describe("scripts/ safety scan", () => {
   it("finds the scripts to scan", () => {
@@ -26,6 +31,11 @@ describe("scripts/ safety scan", () => {
     if (!MENTIONS_REMOTE_FLAG.includes(name)) expect(text).not.toContain("--remote");
   });
 
+  it.each(sources)("$name starts no process unless it is the wrapper or the pilot export", ({ name, text }) => {
+    const code = text.split("\n").filter((l) => !l.trimStart().startsWith("//")).join("\n");
+    if (!MAY_SPAWN.includes(name)) expect(SPAWNS.test(code)).toBe(false);
+  });
+
   it.each(sources)("$name invokes wrangler only through cloud-wrangler.mjs", ({ name, text }) => {
     if (!WRAPPER_FILES.includes(name)) expect(INVOKES_WRANGLER.test(text)).toBe(false);
   });
@@ -34,7 +44,7 @@ describe("scripts/ safety scan", () => {
 describe("the only path to --remote", () => {
   const wrapper = sources.find((s) => s.name === "lib/cloud-wrangler-core.mjs")!.text;
   // The functions allowed to build a --remote command line, each with its fixed config constant.
-  // pilot-export joins this list in its own change.
+  // The read-only pilot export is the third remote path; it has its own describe below, with its own fixed argv builder.
   const REMOTE_FUNCTIONS = [
     { fn: "function runSandbox", config: "SANDBOX_CONFIG" },
     { fn: "function runProduction", config: "PRODUCTION_CONFIG" },
@@ -79,6 +89,38 @@ describe("the only path to --remote", () => {
     const lines = text.split("\n").filter((l) => l.includes("wrangler(") || l.includes('"--remote"'));
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) expect(line).toContain(config);
+  });
+});
+
+describe("the pilot export path (read-only)", () => {
+  const text = sources.find((s) => s.name === EXPORT_FILE)!.text;
+  const code = text.split("\n").filter((l) => !l.trimStart().startsWith("//"));
+  const builderFrom = text.indexOf("function buildExportArgv");
+  const builder = text.slice(builderFrom, text.indexOf("\n}\n", builderFrom));
+
+  it("builds the remote argv in one place, the fixed argv builder, with the fixed batch and nothing passed through", () => {
+    expect(builderFrom).toBeGreaterThan(-1);
+    expect(code.filter((l) => l.includes('"--config"'))).toHaveLength(1);
+    expect(builder).toContain('"--config"');
+    expect(code.filter((l) => l.includes("--remote"))).toHaveLength(1);
+    expect(builder).toContain('"--remote"');
+    expect(builder).toContain("SELECT_BATCH");
+    expect(builder).not.toMatch(/\.\.\.|args|process\./);
+  });
+
+  it("spawns wrangler only with that builder's argv", () => {
+    const spawns = code.filter((l) => /\bspawn\(/.test(l));
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0]).toContain("buildExportArgv(");
+    // The config is the generated one inside the workdir, which stops wrangler from searching parent directories.
+    expect(spawns[0]).toMatch(/buildExportArgv\([^)]*join\(dir, [A-Z_]*CONFIG[A-Z_]*\)/);
+    expect(spawns[0]).not.toMatch(/shell\s*:/);
+    expect(code.join("\n")).not.toMatch(/\bshell\s*:/);
+  });
+
+  it("contains no write, schema or pragma statement and no other wrangler family", () => {
+    expect(code.join("\n")).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/i);
+    expect(code.join("\n")).not.toMatch(/"(r2|secret|deploy|delete|kv|versions|migrations|--file|--local)"/);
   });
 });
 

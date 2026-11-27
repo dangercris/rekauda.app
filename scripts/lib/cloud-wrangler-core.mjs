@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { buildSandboxSeedSql } from "./cloud-sandbox-seed.mjs";
 import { loadAndCheck, loadAndCheckProduction, loadAndCheckSandbox, report } from "./cloud-guard-io.mjs";
 import { confirmTyped } from "./confirm.mjs";
+import { runPilotCleanup, runPilotExport } from "./pilot-export.mjs";
 
 const SUBCOMMANDS = ["dev", "d1", "types"];
 const SANDBOX_SUBCOMMANDS = ["sandbox:migrate", "sandbox:seed", "sandbox:deploy", "sandbox:status"];
@@ -117,6 +118,9 @@ function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confir
 /** root ends with a slash. Returns the exit status. */
 export function runCloudWrangler(args, { root, bin = root + "node_modules/.bin/wrangler", viteBin = root + "node_modules/.bin/vite", spawn = spawnSync, log = console, now = () => new Date().toISOString(), env = process.env, confirm = (phrase) => confirmTyped(phrase) }) {
   const [subcommand, ...rest] = args;
+  // The read-only pilot export lives in its own module, with its own fixed argv (see lib/pilot-export.mjs).
+  if (subcommand === "pilot:export") return runPilotExport(rest, { root, bin, spawn, log, env, confirm });
+  if (subcommand === "pilot:cleanup") return runPilotCleanup(rest, { root, log });
   if (Object.hasOwn(PRODUCTION_COMMANDS, subcommand)) {
     const bad = forbiddenArg(rest);
     if (bad || rest.length > 0) {
@@ -134,7 +138,7 @@ export function runCloudWrangler(args, { root, bin = root + "node_modules/.bin/w
     return runSandbox(subcommand, { root, bin, viteBin, spawn, log, now, env });
   }
   if (!SUBCOMMANDS.includes(subcommand)) {
-    log.error(`[cloud-wrangler] REFUSED: only ${[...SUBCOMMANDS, ...SANDBOX_SUBCOMMANDS, ...Object.keys(PRODUCTION_COMMANDS)].join(", ")} are allowed on this branch.`);
+    log.error(`[cloud-wrangler] REFUSED: only ${[...SUBCOMMANDS, ...SANDBOX_SUBCOMMANDS, ...Object.keys(PRODUCTION_COMMANDS)].join(", ")} are allowed on this branch (plus pilot:export and pilot:cleanup).`);
     return 1;
   }
   if (subcommand === "d1" && !D1_ACTIONS.includes(rest[0])) {

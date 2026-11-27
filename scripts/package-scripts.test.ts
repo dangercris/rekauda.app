@@ -96,3 +96,12 @@ describe("every script in package.json", () => {
     }
   });
 });
+
+describe("pilot:* scripts", () => {
+  it("defines only the export and the cleanup, both through the wrapper with no flags", () => {
+    const names = Object.keys(scripts).filter((name) => name.startsWith("pilot:"));
+    expect(names.sort()).toEqual(["pilot:cleanup", "pilot:export"]);
+    expect(scripts["pilot:export"]).toBe("node scripts/cloud-wrangler.mjs pilot:export");
+    expect(scripts["pilot:cleanup"]).toBe("node scripts/cloud-wrangler.mjs pilot:cleanup");
+  });
+});

@@ -1,6 +1,6 @@
 // Loads the files the guard needs and runs the pure core. Any read or parse error propagates (callers fail closed).
 import { existsSync, readFileSync } from "node:fs";
-import { checkCloudConfig, checkProductionConfig, checkSandboxConfig } from "./cloud-guard-core.mjs";
+import { checkCloudConfig, checkPilotReference, checkProductionConfig, checkSandboxConfig } from "./cloud-guard-core.mjs";
 import { parseJsonc } from "./jsonc.mjs";
 
 // Duplicate keys are refused: wrangler and this parser could otherwise disagree on which value wins.
@@ -54,6 +54,15 @@ export function loadAndCheckProduction({ root, apex }) {
     apex,
   });
   return { result, target };
+}
+
+/** Pilot reference for the read-only export: root wrangler.jsonc plus .pilot-resources.json (both gitignored). Never printed. */
+export function loadPilotReference({ root }) {
+  return checkPilotReference({
+    pilot: readIfExists(root + "wrangler.jsonc", readJsonc),
+    pilotExample: readIfExists(root + "wrangler.example.jsonc", readJsonc),
+    extraDenylist: readIfExists(root + ".pilot-resources.json", (p) => JSON.parse(readFileSync(p, "utf8"))),
+  });
 }
 
 export function report(result, log = console) {
