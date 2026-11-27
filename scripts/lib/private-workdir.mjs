@@ -2,7 +2,8 @@
 // provisioning steps, and removed only by pilot:cleanup. It holds personal data, so it is mode 0700, owned by the
 // current user, lives directly under the OS tmp dir (never inside the repository) and carries a marker file.
 // Nothing here prints a path or a value. No dependencies.
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { chmodSync, closeSync, lstatSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, sep } from "node:path";
 
 const PREFIX = "rekauda-pilot-";
@@ -27,7 +28,21 @@ export function createWorkdir({ root, tmp, now = () => new Date().toISOString() 
 }
 
 export const readManifest = (dir) => JSON.parse(readFileSync(join(dir, MANIFEST), "utf8"));
-export const writeManifest = (dir, manifest) => writeFileSync(join(dir, MANIFEST), JSON.stringify(manifest, null, 2), { mode: 0o600 });
+/** Atomic: the new content goes to an exclusive temp file (0600) that is renamed over the manifest, so a crash never leaves a half-written one. */
+export function writeManifest(dir, manifest) {
+  const text = JSON.stringify(manifest, null, 2);
+  const file = join(dir, MANIFEST);
+  const temp = `${file}.${randomBytes(6).toString("hex")}.tmp`;
+  const fd = openSync(temp, "wx", 0o600);
+  try {
+    writeSync(fd, text);
+    closeSync(fd);
+    renameSync(temp, file);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
+}
 
 /** Validates a workdir (marker, mode, owner, location, no symlink). Returns { dir, manifest } or throws a generic error. */
 export function openWorkdir(path, { root, tmp }) {

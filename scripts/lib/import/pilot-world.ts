@@ -34,7 +34,7 @@ export function makePilotWorld({ plan = true, provisioned = true, tenant = { slu
     manifest.exports.push({ file: `export-${n}.json`, hash, counts: {}, at: NOW, matchesFirst: n === 1 ? null : hash === manifest.exports[0].hash });
   }
   // prod:provision records the tenant in the manifest; a world for provisioning tests starts without it.
-  if (provisioned) manifest.tenant = { id: TENANT_ID, slug: SLUG };
+  if (provisioned) manifest.tenant = { id: TENANT_ID, slug: SLUG, state: "provisioned" };
   writeManifest(dir, manifest);
   const quiet = { error: () => undefined, warn: () => undefined, log: () => undefined };
   if (plan) expect(runImportPlan([dir], { root: root + "/", log: quiet, tmp })).toBe(0);
