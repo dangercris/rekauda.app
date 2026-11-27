@@ -28,6 +28,8 @@ function setup(exportsOf: PilotTables[] = [makeTables(), makeTables()], tweak?: 
     const hash = canonicalHash(tables);
     manifest.exports.push({ file, hash, counts: {}, at: "2026-11-27T00:00:00Z", matchesFirst: i === 0 ? null : hash === manifest.exports[0].hash });
   });
+  // Provisioning records the tenant in the manifest; the plan reads the id from there.
+  manifest.tenant = { id: TENANT_ID, slug: "curso-demo" };
   tweak?.(manifest);
   writeManifest(dir, manifest);
   const out: string[] = [];
@@ -51,7 +53,7 @@ describe("checkManifestGate", () => {
 describe("pilot:import:plan", () => {
   it("writes the SQL file into the workdir with mode 0600 and prints only counts", () => {
     const { dir, out, run } = setup();
-    expect(run(dir, TENANT_ID)).toBe(0);
+    expect(run(dir)).toBe(0);
     const file = join(dir, "import.sql");
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(readFileSync(file, "utf8")).toContain("INSERT INTO collections");
@@ -68,30 +70,30 @@ describe("pilot:import:plan", () => {
       m.exports[2].hash = m.exports[1].hash;
     });
     // The third entry claims the same hash as the others but its file differs: the plan must notice and refuse.
-    expect(run(dir, TENANT_ID)).toBe(1);
+    expect(run(dir)).toBe(1);
   });
 
   it("refuses without two matching exports and writes nothing", () => {
     for (const exportsOf of [[makeTables()], [makeTables(), { ...makeTables(), collections: [] }]]) {
       const { dir, run } = setup(exportsOf as PilotTables[]);
-      expect(run(dir, TENANT_ID)).toBe(1);
+      expect(run(dir)).toBe(1);
       expect(readdirSync(dir)).not.toContain("import.sql");
     }
   });
 
   it("leaves no plan file after a refused run that follows a successful one, and no temp files after success", () => {
     const { dir, run } = setup();
-    expect(run(dir, TENANT_ID)).toBe(0);
+    expect(run(dir)).toBe(0);
     expect(readdirSync(dir).filter((f) => f.includes("import"))).toEqual(["import.sql"]);
     writeManifest(dir, { ...readManifest(dir), mismatchSeen: true });
-    expect(run(dir, TENANT_ID)).toBe(1);
+    expect(run(dir)).toBe(1);
     expect(readdirSync(dir)).not.toContain("import.sql");
     expect(readdirSync(dir).some((f) => f.includes("tmp"))).toBe(false);
   });
 
   it("removes a stale plan file when the preflight fails", () => {
     const { dir, run } = setup();
-    expect(run(dir, TENANT_ID)).toBe(0);
+    expect(run(dir)).toBe(0);
     const bad = makeTables();
     bad.payments[0]!.collection_id = "ghost";
     const file = join(dir, "export-2.json");
@@ -100,34 +102,52 @@ describe("pilot:import:plan", () => {
     manifest.exports[1].hash = canonicalHash(bad);
     manifest.exports[0].hash = manifest.exports[1].hash;
     writeManifest(dir, manifest);
-    expect(run(dir, TENANT_ID)).toBe(1);
+    expect(run(dir)).toBe(1);
     expect(readdirSync(dir)).not.toContain("import.sql");
   });
 
   it("refuses a mismatch seen earlier even if the last export matches", () => {
     const { dir, run } = setup(undefined, (m) => { m.mismatchSeen = true; });
-    expect(run(dir, TENANT_ID)).toBe(1);
+    expect(run(dir)).toBe(1);
   });
 
   it("fails the run on a preflight problem, listing counts only, with no SQL file", () => {
     const bad = makeTables();
     bad.payments[0]!.collection_id = "ghost";
     const { dir, out, run } = setup([bad, bad]);
-    expect(run(dir, TENANT_ID)).toBe(1);
+    expect(run(dir)).toBe(1);
     expect(readdirSync(dir)).not.toContain("import.sql");
     expect(out.join("\n")).toMatch(/payments_collection=1/);
     expect(out.join("\n")).not.toMatch(/ghost|Familia/);
   });
 
-  it.each([[[]], [["not-a-dir", TENANT_ID]], [["--force"]]])("refuses bad arguments %j", (args) => {
+  it.each([[[]], [["not-a-dir"]], [["--force"]]])("refuses bad arguments %j", (args) => {
     const { run } = setup();
     expect(run(...(args as string[]))).toBe(1);
   });
 
-  it("refuses a tenant id that is not a UUID", () => {
+  it("takes only the workdir: a tenant id argument is refused, the id comes from the manifest", () => {
     const { dir, run } = setup();
-    expect(run(dir, "curso-demo")).toBe(1);
+    expect(run(dir, TENANT_ID)).toBe(1);
     expect(readdirSync(dir)).not.toContain("import.sql");
+  });
+
+  it.each([
+    ["no provisioned tenant", (m: any) => delete m.tenant],
+    ["a tenant id that is not a UUID", (m: any) => (m.tenant = { id: "curso-demo", slug: "curso-demo" })],
+    ["an uppercase UUID", (m: any) => (m.tenant = { id: TENANT_ID.toUpperCase(), slug: "curso-demo" })],
+    ["a tenant without a valid slug", (m: any) => (m.tenant = { id: TENANT_ID, slug: "Bad Slug" })],
+  ])("refuses a manifest with %s", (_name, tweak) => {
+    const { dir, run, out } = setup(undefined, tweak);
+    expect(run(dir)).toBe(1);
+    expect(readdirSync(dir)).not.toContain("import.sql");
+    expect(out.join("\n")).toMatch(/prod:provision/);
+  });
+
+  it("records the manifest tenant in the plan", () => {
+    const { dir, run } = setup();
+    expect(run(dir)).toBe(0);
+    expect(readManifest(dir).plan.tenantId).toBe(TENANT_ID);
   });
 });
 
@@ -143,16 +163,16 @@ describe("import modules stay local", () => {
 describe("the plan record in the manifest", () => {
   it("records the file hash, tenant and export it was built from", () => {
     const { dir, run } = setup();
-    expect(run(dir, TENANT_ID)).toBe(0);
+    expect(run(dir)).toBe(0);
     const { plan, exports } = readManifest(dir);
     expect(plan).toEqual({ file: "import.sql", sha256: createHash("sha256").update(readFileSync(join(dir, "import.sql"))).digest("hex"), tenantId: TENANT_ID, exportFile: "export-2.json", exportHash: exports[1].hash });
   });
 
   it("drops the record when a later run refuses", () => {
     const { dir, run } = setup();
-    expect(run(dir, TENANT_ID)).toBe(0);
+    expect(run(dir)).toBe(0);
     writeManifest(dir, { ...readManifest(dir), mismatchSeen: true });
-    expect(run(dir, TENANT_ID)).toBe(1);
+    expect(run(dir)).toBe(1);
     expect(readManifest(dir).plan).toBeUndefined();
   });
 });
