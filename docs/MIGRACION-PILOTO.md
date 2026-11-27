@@ -65,18 +65,19 @@ Responsable: dueño, con revisor para todo paso manual. **Esta fase sí cambia l
 
 1. Responsable: dueño, MANUAL. Exporta el inventario de la zona: registros DNS, rutas de Workers, dominios personalizados, reglas de Email Routing y direcciones, reglas de redirección y de página, y el SPF (TXT) actual.
 2. Confirma que el apex del piloto es un **dominio personalizado** del Worker del piloto (panel del Worker, "Domains & Routes", tipo Custom domain) y no una ruta. Si es una ruta con el mismo patrón que la de Cloud, la precedencia cambia: No-go hasta decidir con el revisor.
-3. P0.5. El comodín `*.<dominio-raiz>/*` captura todo subdominio con proxy existente, también los que tienen dominio personalizado. Go: ningún subdominio con proxy queda bajo el comodín, o cada uno tiene una **ruta de exclusión "sin Worker" creada a mano en el panel** (no puede vivir en `wrangler.production.jsonc`, porque la guarda solo admite el comodín y una entrada del apex). No-go: hay un host con proxy sin cubrir. No crees el comodín.
+3. P0.5. El comodín `*.<dominio-raiz>/*` captura todo subdominio con proxy existente, también los que tienen dominio personalizado. Go: ningún subdominio con proxy queda bajo el comodín, o cada uno tendrá una **ruta de exclusión "sin Worker" creada a mano en el panel** (no puede vivir en `wrangler.production.jsonc`, porque la guarda solo admite el comodín y una entrada del apex). Anota la lista, pero **todavía no crees las exclusiones**: se crean en la sección 1.3, después de la sonda P0.6. No-go: hay un host con proxy sin cubrir. No crees el comodín.
 
-### 1.2 Sondas del dueño (P0.1 y P0.2)
+### 1.2 Sondas del dueño (P0.1, P0.2 y P0.6)
 
-Cada sonda se ejecuta a mano, nunca un agente. Usan **solo recursos de la sandbox** o pasos del panel marcados así, con hosts de prueba `cd-probe-<aleatorio>` y entrada cerrada (`< /dev/null`) como la lanzan los scripts. Antes de cada comando de wrangler: `wrangler whoami` y `--config` apuntando a la configuración de la sandbox. Anota el resultado al lado (fecha, resultado, decisión). Un No-go detiene la migración hasta que el dueño y el revisor decidan por escrito.
+Cada sonda se ejecuta a mano, nunca un agente. Los Workers y recursos de datos son **de la sandbox** (la misma cuenta), pero P0.1 y P0.6 crean dominios y rutas de prueba `cd-probe-<aleatorio>` en la **zona viva de producción**. Por eso cada una tiene su ventana, su comprobación de cuenta y su reversa. Entrada cerrada (`< /dev/null`) como la lanzan los scripts. Antes de cada comando de wrangler: `wrangler whoami` y `--config` apuntando a la configuración de la sandbox. Antes de tocar la zona, compara la cuenta con la fijada (`account_id` de `wrangler.production.jsonc`). Anota el resultado al lado (fecha, resultado, decisión). Un No-go detiene la migración hasta que el dueño y el revisor decidan por escrito.
 
-**P0.1 La ruta gana al dominio personalizado.** Solo panel (MANUAL).
+**P0.1 La ruta gana al dominio personalizado.** Solo panel (MANUAL), sobre la zona viva.
+- Ventana: fuera del horario de pagos, con el revisor presente; el host de prueba no existe antes ni después, así que no afecta tráfico real. Comprobación: `wrangler whoami` y el panel muestran la cuenta fijada.
 - Hacer: asocia el host `cd-probe-<aleatorio>.<dominio-raiz>` como dominio personalizado de un Worker de la sandbox A y agrega la ruta `cd-probe-<aleatorio>.<dominio-raiz>/*` hacia un Worker de la sandbox B. Pide el host con `curl -sI`.
 - Verificar: Workers Logs muestran qué Worker respondió.
 - Go: responde el Worker de la ruta. Entonces la ruta `<dominio-raiz>/*` toma el apex sin tocar al piloto. Si el panel acepta la ruta, queda un último punto que solo se ve en el cambio real: que `prod:switch-apex` no sea rechazado por Cloudflare. Si lo rechaza, el apex no cambió (verifícalo con el panel y con `curl`) y se usa la alternativa de la sección 3.4.
 - No-go: responde el dominio personalizado o el panel rechaza la ruta. Usa la alternativa de la sección 3.4 y ajusta la fase 2 antes de seguir.
-- Revertir: borra la ruta y el dominio de prueba.
+- Revertir: borra la ruta y el dominio de prueba y confirma en el panel de la zona que no quedan registros `cd-probe-`.
 
 **P0.2 `wrangler d1 execute` y R2 sin terminal.** Con la D1 y el bucket de la sandbox y un config generado en un directorio temporal (`account_id` y una sola entrada `d1_databases`, sin otro config en el árbol).
 - (a) Forma del resultado: `wrangler d1 execute <nombre-d1> --remote --json --config <generado> --command "SELECT 1 AS a; SELECT 2 AS b;"`. Go: un arreglo JSON con una entrada por sentencia, en orden, cada una con `success: true` y `results`. No-go: una sola entrada o un error. `pilot:export` depende de esa forma: se detiene el proyecto y se cambia a cuatro SELECT separados (cambio de código).
@@ -85,11 +86,22 @@ Cada sonda se ejecuta a mano, nunca un agente. Usan **solo recursos de la sandbo
 - (d) `wrangler r2 object put <bucket-sandbox>/t/prueba/assets/x.png --file <png> --content-type image/png --remote --config <generado>`. Go: sube sin preguntar y toma la cuenta del config. Verifica con `wrangler r2 object get ... --remote --config <generado> --file <destino>`. No-go: pide confirmación o usa otra cuenta.
 - Revertir: borra la tabla y el objeto de prueba.
 
-### 1.3 Despliegue de Cloud (P0.6)
+**P0.6 `wrangler deploy` y las rutas creadas a mano.** Se hace **antes** del primer despliegue real, antes de crear las exclusiones reales, el comodín y el registro `*`. Panel sobre la zona viva más el script de la sandbox.
+- Ventana: la de P0.1. Comprobación de cuenta: la misma. Los hosts son de prueba, sin tráfico.
+- Hacer: en el panel crea (1) una ruta `cd-probe-<aleatorio>-a.<dominio-raiz>/*` asignada a un Worker de la sandbox y (2) una ruta de exclusión "sin Worker" para `cd-probe-<aleatorio>-b.<dominio-raiz>/*`. Ejecuta `pnpm sandbox:deploy` (que despliega los Workers de la sandbox).
+- Verificar: ¿siguen las dos rutas en el panel?
+- Go: siguen. Limitación: la sandbox no define `routes`, y el Worker de producción sí (la lista del comodín); por eso la comprobación de la sección 1.3, paso 4, tras el primer despliegue real, sigue siendo obligatoria.
+- No-go: el despliegue borró alguna. Entonces ninguna ruta creada a mano sobrevive a un despliegue: tras cada despliegue hay que recrear las exclusiones del inventario, o no desplegar con exclusiones activas, y el dueño lo decide por escrito antes de seguir.
+- Revertir: borra las dos rutas de prueba y confirma que no quedan.
 
-1. Responsable: dueño, MANUAL con revisor. Con P0.5 en Go: registro DNS `*` AAAA `100::` con proxy. Ventana: cualquiera, no afecta hosts con registro propio. Verificar: `curl -sI https://zzz.<dominio-raiz>/` llega a Cloud o responde 404 de Cloud tras el paso 2, y los subdominios del inventario siguen igual. Revertir: borra el registro `*`.
-2. Responsable: dueño. `pnpm prod:guard` debe terminar en OK. Luego `pnpm prod:migrate` (frase `MIGRATE PRODUCTION`) y `pnpm prod:deploy` (frase `DEPLOY PRODUCTION`), leyendo antes la línea `worker=... account=... root=...` (sección 0.1, punto 7). Verifica con `pnpm prod:status`. Revertir: borra la ruta o el Worker en el panel.
-3. **P0.6 `wrangler deploy` y las rutas creadas a mano.** MANUAL. Crea en el panel una ruta de exclusión "sin Worker" para un host de prueba `cd-probe-<aleatorio>.<dominio-raiz>/*` y ejecuta de nuevo `pnpm prod:deploy` (frase `DEPLOY PRODUCTION`). Verificar: ¿sigue la ruta en el panel? Go: sigue. No-go: el despliegue la borró. Entonces ninguna exclusión creada a mano sobrevive a un despliegue: tras cada despliegue hay que revisar y recrear las exclusiones del inventario, o no desplegar con exclusiones activas, y el dueño lo decide por escrito antes de seguir. Revertir: borra la ruta de prueba.
+### 1.3 Despliegue de Cloud
+
+Solo con P0.5 y P0.6 en Go.
+
+1. Responsable: dueño, MANUAL con revisor. Crea las rutas de exclusión "sin Worker" del inventario (sección 1.1, punto 3). Ventana: cualquiera, solo protegen hosts que ya existen. Verificar: cada host del inventario sigue respondiendo lo mismo con `curl -sI`. Revertir: borra la ruta de exclusión.
+2. Responsable: dueño, MANUAL con revisor. Registro DNS `*` AAAA `100::` con proxy. Ventana: cualquiera, no afecta hosts con registro propio. Verificar: `curl -sI https://zzz.<dominio-raiz>/` llega a Cloud o responde 404 de Cloud tras el paso 3, y los subdominios del inventario siguen igual. Revertir: borra el registro `*`.
+3. Responsable: dueño. `pnpm prod:guard` debe terminar en OK. Luego `pnpm prod:migrate` (frase `MIGRATE PRODUCTION`) y `pnpm prod:deploy` (frase `DEPLOY PRODUCTION`), leyendo antes la línea `worker=... account=... root=...` (sección 0.1, punto 7). Verifica con `pnpm prod:status`. Revertir: borra la ruta o el Worker en el panel.
+4. Responsable: dueño. **Tras cada despliegue** (este y todos los siguientes, incluidos los de la fase 2) comprueba en el panel que las exclusiones del inventario siguen existiendo. Si falta alguna, recréala de inmediato y aplica la decisión escrita de P0.6.
 
 ### 1.4 Cambios de correo en la zona viva (P0.3 y P0.4)
 
@@ -109,27 +121,28 @@ Ventana común: fuera del horario de pagos y cuando no se esperan correos de Deu
 
 ### 1.5 Lista de la sandbox
 
-Responsable: dueño. Pasa la [lista de la sandbox](CLOUD-SANDBOX-CHECKLIST.md) (secciones 1 a 5) contra la zona de producción usando el **tenant del ensayo** de la sección 1.6, antes de deshacerlo. Del "Revertir" de esa lista solo aplica lo que dice la propia lista para cada punto; **nunca** su bloque final de borrado (Nunca, punto 7).
+Responsable: dueño. Pasa la [lista de la sandbox](CLOUD-SANDBOX-CHECKLIST.md) contra la zona de producción usando el **tenant del ensayo** de la sección 1.6, antes de deshacerlo, pero **excluye los puntos 4.2, 5.2, 5.3, 5.4 y 5.5**. Esos puntos envían o archivan correo de Deuna: crean una fila en `bank_movements` que no está en el plan (`prod:undo-tenant` se negaría por "puede estar en vivo" y el borrado manual está prohibido) y dejan objetos `.eml` bajo `t/<tenant-id>/` y un correo real en producción. El correo entrante se prueba solo en el alcance de P0.3 (sección 1.4, sin tenant) y de punta a punta en la sección 6, punto 2, con el tenant real, donde cualquier fila o `.eml` se concilia y no se deshace. Del "Revertir" de la lista solo aplica lo que dice cada punto; **nunca** su bloque final de borrado (Nunca, punto 7).
 
 ### 1.6 Ensayo con datos inventados
 
 Nunca con un export real. Este ensayo termina con **limpieza total** antes de la fase 1.
 
 1. Responsable: dueño. `pnpm pilot:demo-workdir` (local, sin red, sin frase) crea un `<workdir>` nuevo con dos exports idénticos de datos inventados, en el formato exacto del export real. Imprime la ruta y los conteos.
-2. Crea `<workdir>/tenant.json` como en la sección 2, paso 2, con un slug de ensayo (por ejemplo `ensayo-<aleatorio>`) y un QR cualquiera.
+2. Los ids del export inventado (`col-1`, `pay-1` y similares) son **claves primarias globales** de Cloud. Un ensayo debe deshacerse por completo antes de empezar otro o de la fase 1, o el import se niega por colisión de ids. Crea `<workdir>/tenant.json` como en la sección 2, paso 2, con un slug de ensayo (por ejemplo `ensayo-<aleatorio>`) y un QR cualquiera.
 3. `pnpm prod:provision <workdir>` (frase `PROVISION <slug-de-ensayo>`), `pnpm pilot:import:plan <workdir>`, `pnpm prod:import <workdir> <tenant-id> <slug-de-ensayo>` (frase `IMPORT <slug-de-ensayo>`) y `pnpm prod:validate <workdir> <tenant-id> <slug-de-ensayo>` (frase `VALIDATE <slug-de-ensayo>`, debe dar MATCH).
-4. Usa ese tenant para la lista de la sandbox (sección 1.5).
+4. Usa ese tenant para la lista de la sandbox, con las exclusiones de la sección 1.5.
 5. Limpieza total:
    1. `pnpm prod:undo-tenant <workdir> <tenant-id> <slug-de-ensayo>` (frase `UNDO TENANT <slug-de-ensayo>`).
    2. Panel de R2: borra la clave exacta `t/<tenant-id>/assets/deuna-qr.<ext>` (el undo no la borra).
    3. Consola de D1: `SELECT id, slug FROM tenants WHERE source = 'pilot_import';` no debe listar el slug de ensayo, y los conteos de datos de ese tenant deben ser cero.
-   4. `pnpm pilot:cleanup <workdir>`.
-   5. Si usaste un correo propio para el enlace mágico, revisa que su sesión ya no exista (el undo la borra) y limpia la bandeja.
+   4. Revisa en el panel de R2 los objetos bajo `t/<tenant-id>/` del tenant que usó la lista (QR, y cualquier `.eml` o recibo que haya quedado) y borra solo las claves exactas, nunca una carpeta ni otro prefijo.
+   5. `pnpm pilot:cleanup <workdir>`.
+   6. Si usaste un correo propio para el enlace mágico, revisa que su sesión ya no exista (el undo la borra) y limpia la bandeja.
 
 ### Compuertas de la fase 0
 
 - Go: inventario hecho; P0.1 a P0.6 con resultado anotado y sin No-go abierto; `prod:guard` OK; Cloud desplegado en el comodín; correo y SPF verificados; lista de la sandbox aprobada; ensayo con limpieza total comprobada.
-- No-go: cualquiera de lo anterior sin cumplir. Rollback de la fase: borra la ruta comodín, el registro `*`, el Worker, el subdominio `in.` y los registros DKIM, y restaura el SPF del inventario. El piloto no cambió.
+- No-go: cualquiera de lo anterior sin cumplir. Rollback de la fase, en este orden: borra las rutas de prueba y las exclusiones, la ruta comodín y el registro `*`; el Worker y la D1, los buckets R2 (vacíos primero, solo `rekauda-cloud-*`) y los espacios de nombres de limitadores creados en 0.1, punto 2; el subdominio `in.` de Email Routing; el dominio remitente de `send_email` con sus registros DKIM; y restaura el SPF del inventario. El piloto no cambió.
 
 ## 2. Fase 1: migrar los datos (ejecución en paralelo)
 
@@ -177,13 +190,13 @@ MANUAL con revisor y frase escrita. Hazla solo con la fase 1 en Go y en la venta
 ### 3.1 Antes del cambio (el apex todavía no está en la configuración)
 
 1. Responsable: dueño. Agrega `LEGACY_REDIRECTS` (sección 0.1, punto 4) a `wrangler.production.jsonc`, con **solo la ruta comodín** en `routes`. `pnpm prod:guard` debe pasar.
-2. Responsable: dueño. `pnpm prod:deploy` (frase `DEPLOY PRODUCTION`). Todavía no hay entrada del apex, así que la frase es esa y no `SWITCH APEX`.
+2. Responsable: dueño. `pnpm prod:deploy` (frase `DEPLOY PRODUCTION`). Todavía no hay entrada del apex, así que la frase es esa y no `SWITCH APEX`. Después comprueba que las exclusiones siguen (sección 1.3, paso 4).
 3. Responsable: dueño. Prueba el 302 por `www`, que el comodín cubre y el Worker trata como apex, siempre que el inventario muestre `www` libre: `curl -sI https://www.<dominio-raiz>/<ruta-heredada>?x=1`. Esperado: 302 con `Cache-Control: no-store` a `https://<slug-del-curso>.<dominio-raiz>/<ruta-heredada>?x=1`. Si `www` ya existe, No-go: elige otra prueba con el revisor.
 4. Responsable: dueño. Con el piloto aún en Go (export final con MATCH, paso 9 de la fase 1), agrega la entrada del apex a `routes`: `{ "pattern": "<dominio-raiz>/*", "zone_name": "<dominio-raiz>" }` (o, solo si P0.1 dio No-go, `{ "pattern": "<dominio-raiz>", "custom_domain": true }`). `pnpm prod:guard` debe pasar con el apex.
 
 ### 3.2 Cambio
 
-1. Responsable: dueño. `pnpm prod:switch-apex` (frase `SWITCH APEX`), leyendo antes la línea `worker=... account=... root=...`. Es el script que despliega con la ruta del apex.
+1. Responsable: dueño. `pnpm prod:switch-apex` (frase `SWITCH APEX`), leyendo antes la línea `worker=... account=... root=...`. Es el script que despliega con la ruta del apex. Después comprueba otra vez que las exclusiones siguen (sección 1.3, paso 4).
 2. Verificar con `curl -sI`: `https://<dominio-raiz>/<ruta-heredada>?x=1` responde 302, `no-store` y conserva la consulta; `https://<dominio-raiz>/` responde la página de bienvenida de Cloud; `https://<dominio-raiz>/admin` y cualquier otra ruta del apex responden 404; `<ruta-heredada>//` responde 404 (solo se tolera una barra final).
 3. Revisa un enlace antiguo real de una familia y el ingreso al admin en el host nuevo.
 
@@ -216,7 +229,7 @@ Todos corren desde la raíz del repositorio. Los `prod:*` aplican la guarda de p
 | `pnpm prod:migrate` | ninguno | `MIGRATE PRODUCTION` | la guarda falla, sin terminal |
 | `pnpm prod:deploy` | ninguno | `DEPLOY PRODUCTION`; **`SWITCH APEX` si la configuración trae la entrada del apex** | falla alguna regla de la guarda, sin terminal |
 | `pnpm prod:switch-apex` | ninguno | `SWITCH APEX` | **no** hay entrada del apex, o la guarda falla |
-| `pnpm pilot:demo-workdir` | ninguno | ninguna | recibe argumentos (local, sin red, datos inventados) |
+| `pnpm pilot:demo-workdir` | ninguno | ninguna | recibe argumentos, o Node < 22.18 (local, sin red, datos inventados; requiere Node >= 22.18) |
 | `pnpm pilot:export` | `[<workdir>]` | `EXPORT PILOT READ-ONLY` | hay argumentos extra o flags, la referencia del piloto está incompleta (falta `productionRoot`, nombre, id o cuenta), el argumento no es un workdir propio, sin terminal. Sale con 3 en MISMATCH |
 | `pnpm pilot:cleanup` | `<workdir>` | ninguna | el directorio no tiene la marca de la herramienta (no borra nada) |
 | `pnpm pilot:import:plan` | `<workdir>` | ninguna | Node < 22.18; no hay provisión terminada; faltan dos exports iguales o hubo un MISMATCH; el preflight falla |
@@ -276,7 +289,7 @@ Todo deshacer solo vale con el import **sin estar en vivo**: necesita el plan de
 ## 6. Después del cambio
 
 1. Responsable: dueño. Con el apex verificado (compuertas de la fase 2 en Go) y la dirección de entrada `d-<token>@in.<dominio-raiz>` guardada en el gestor de secretos del equipo (se lee de `handover.txt` una sola vez, en una terminal privada), ejecuta `pnpm pilot:cleanup <workdir>`: borra exports, SQL y `handover.txt`. La reversa del apex no necesita el workdir. Hazlo a más tardar al cambiar el correo de Deuna (punto 2).
-2. Responsable: dueño. **+24 a 48 h** con Cloud estable: cambia el correo de Deuna a `d-<token>@in.<dominio-raiz>`. La dirección antigua sigue en el piloto durante los 14 días. Revertir: devuelve la dirección anterior en Deuna. Los correos que hayan llegado a Cloud en ese lapso se conservan en su archivo de correo: concilia con la importación de `.eml` del admin del sistema que quede activo.
+2. Responsable: dueño. **+24 a 48 h** con Cloud estable: cambia el correo de Deuna a `d-<token>@in.<dominio-raiz>`. Verifica de punta a punta con el primer correo real (DKIM, aviso y `.eml` archivado en `MAIL_ARCHIVE`, puntos 5.3 y 5.4 de la lista de la sandbox); esos datos son reales y se concilian, no se deshacen. La dirección antigua sigue en el piloto durante los 14 días. Revertir: devuelve la dirección anterior en Deuna. Los correos que hayan llegado a Cloud en ese lapso se conservan en su archivo de correo: concilia con la importación de `.eml` del admin del sistema que quede activo.
 3. Responsable: dueño. **+14 días** sin incidentes: retira el Worker del piloto (bórralo o déjalo, pero **no** crees un Worker que solo redirija). **Conserva la D1 y el bucket R2 del piloto**: los comprobantes no se migran y son la prueba de los pagos. Propuesta: guardarlos al menos 90 días después del cierre de la última recaudación migrada y borrarlos solo con la aprobación escrita de tesorería y del dueño.
 4. Responsable: dueño. Quita la regla antigua de Email Routing del piloto **solo después de confirmar** que Deuna entrega a la dirección nueva (llega al menos un correo real de movimiento a Cloud). Revertir: vuelve a crear la regla.
 5. Responsable: dueño. Revoca los tokens de API de la migración (sección 0.1, punto 6).

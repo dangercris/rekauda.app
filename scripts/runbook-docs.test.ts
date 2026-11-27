@@ -141,6 +141,37 @@ describe("docs/MIGRACION-PILOTO.md", () => {
     expect(problems).toEqual([]);
   });
 
+  it("tests P0.6 before the first real deploy, the exclusions and the wildcard", () => {
+    const p06 = runbook.indexOf("**P0.6");
+    const firstDeploy = runbook.indexOf("pnpm prod:deploy");
+    const exclusions = runbook.indexOf("Crea las rutas de exclusión");
+    const wildcard = runbook.indexOf("DNS `*` AAAA");
+    expect(p06).toBeGreaterThan(0);
+    for (const later of [firstDeploy, exclusions, wildcard]) expect(later).toBeGreaterThan(p06);
+    expect(runbook).toMatch(/tras cada despliegue[^\n]*exclusiones/i);
+  });
+
+  it("keeps the inbound mail checks out of any tenant that must stay undoable", () => {
+    const section = runbook.slice(runbook.indexOf("### 1.5"), runbook.indexOf("### 1.6"));
+    for (const excluded of ["4.2", "5.2", "5.3", "5.4", "5.5"]) expect(section).toContain(excluded);
+    expect(section).toMatch(/no (se )?ejecutes?|excluy/i);
+  });
+
+  it("rolls back every resource of phase 0, and states window, account check and revert for live-zone probes", () => {
+    const gates = runbook.slice(runbook.indexOf("### Compuertas de la fase 0"), runbook.indexOf("## 2. Fase 1"));
+    for (const needle of ["D1", "R2", "limitadores", "send_email"]) expect(gates).toContain(needle);
+    const probes = runbook.slice(runbook.indexOf("### 1.2"), runbook.indexOf("### 1.3"));
+    expect(probes).toMatch(/Ventana/);
+    expect(probes).toContain("wrangler whoami");
+    expect(probes).not.toMatch(/solo recursos de la sandbox/i);
+  });
+
+  it("warns that demo ids are global and notes Node in the demo workdir row", () => {
+    expect(runbook).toMatch(/ids[^\n]*(globales|claves primarias globales)[^\n]*colisi/i);
+    const row = runbook.split("\n").find((l) => l.includes("`pnpm pilot:demo-workdir` | ninguno"))!;
+    expect(row).toContain("Node >= 22.18");
+  });
+
   it("has a consolidated Nunca section", () => {
     const from = runbook.indexOf("## Nunca");
     const section = runbook.slice(from, runbook.indexOf("\n## ", from + 5));
