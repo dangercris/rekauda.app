@@ -131,6 +131,7 @@ La guarda de seguridad lee `wrangler.jsonc` y, opcionalmente, `.pilot-resources.
 | 📬 [docs/CORREO-DEUNA.md](docs/CORREO-DEUNA.md) | Quien instala y tesorería | Confirmación automática por correo de Deuna |
 | 🧮 [docs/OPERACION.md](docs/OPERACION.md) | Tesorería | Uso diario, revisión, cierre y borrado de datos |
 | ☁️ [docs/CLOUD-SANDBOX-CHECKLIST.md](docs/CLOUD-SANDBOX-CHECKLIST.md) | Quien publique Cloud | Verificaciones en un dominio de pruebas antes de salir a producción |
+| 🚚 [docs/MIGRACION-PILOTO.md](docs/MIGRACION-PILOTO.md) | Quien publique Cloud | Runbook para migrar el curso del piloto a Cloud y mover el dominio raíz, con compuertas Go y No-go |
 | 🏗️ [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Desarrolladores | Componentes, rutas, correo, analíticas y modelo de amenazas |
 | 🤝 [CONTRIBUTING.md](CONTRIBUTING.md) | Contribuyentes | Pruebas, convenciones y cómo proponer cambios |
 | 🎨 [DESIGN.md](DESIGN.md) y [PRODUCT.md](PRODUCT.md) | Diseño y producto | Sistema de diseño y propósito del producto |
