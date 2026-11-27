@@ -119,6 +119,15 @@ describe("docs/MIGRACION-PILOTO.md", () => {
     expect(bad).toEqual([]);
   });
 
+  it("says undo never removes a reused owner, in the reference notes and in the manual removal", () => {
+    const text = read("docs/MIGRACION-PILOTO.md");
+    expect(text).toMatch(/reusedOwnerId/);
+    const notes = text.slice(text.indexOf("Notas: el `<tenant-id>`"));
+    expect(notes.slice(0, notes.indexOf("\n"))).toMatch(/REUSE OWNER[^\n]*no (se )?borra/i);
+    const manual = text.slice(text.indexOf("Lee los usuarios **antes**"));
+    expect(manual.slice(0, manual.indexOf("Ejecuta una a una"))).toMatch(/REUSE OWNER[\s\S]*no la borres/i);
+  });
+
   it("has a not-live check before the manual deletes and a Time Travel bookmark", () => {
     const manual = runbook.slice(runbook.indexOf("DELETE FROM bank_movements") - 3500, runbook.indexOf("DELETE FROM bank_movements"));
     expect(manual).toMatch(/SELECT COUNT\(\*\)/);
