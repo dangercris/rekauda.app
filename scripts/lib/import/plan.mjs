@@ -95,7 +95,7 @@ export function runImportPlan(args, { root, log = console, tmp = tmpdir() }) {
       writeManifest(dir, manifest);
     }
     const tenantId = manifest.tenant?.id;
-    if (typeof tenantId !== "string" || !UUID.test(tenantId) || typeof manifest.tenant.slug !== "string" || !SLUG.test(manifest.tenant.slug)) return refuse("the workdir has no provisioned tenant; run prod:provision first.");
+    if (typeof tenantId !== "string" || !UUID.test(tenantId) || typeof manifest.tenant.slug !== "string" || !SLUG.test(manifest.tenant.slug) || manifest.tenant.state !== "provisioned") return refuse("the workdir has no finished provisioning; run prod:provision first (or prod:undo-tenant if an earlier run did not finish).");
     if (!checkManifestGate(manifest).ok) return refuse("needs two matching pilot exports and no mismatch ever seen.");
     const latest = manifest.exports.at(-1);
     const tables = JSON.parse(readFileSync(join(dir, latest.file), "utf8")).tables;

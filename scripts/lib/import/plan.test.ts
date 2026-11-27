@@ -29,7 +29,7 @@ function setup(exportsOf: PilotTables[] = [makeTables(), makeTables()], tweak?: 
     manifest.exports.push({ file, hash, counts: {}, at: "2026-11-27T00:00:00Z", matchesFirst: i === 0 ? null : hash === manifest.exports[0].hash });
   });
   // Provisioning records the tenant in the manifest; the plan reads the id from there.
-  manifest.tenant = { id: TENANT_ID, slug: "curso-demo" };
+  manifest.tenant = { id: TENANT_ID, slug: "curso-demo", state: "provisioned" };
   tweak?.(manifest);
   writeManifest(dir, manifest);
   const out: string[] = [];
@@ -134,9 +134,11 @@ describe("pilot:import:plan", () => {
 
   it.each([
     ["no provisioned tenant", (m: any) => delete m.tenant],
-    ["a tenant id that is not a UUID", (m: any) => (m.tenant = { id: "curso-demo", slug: "curso-demo" })],
-    ["an uppercase UUID", (m: any) => (m.tenant = { id: TENANT_ID.toUpperCase(), slug: "curso-demo" })],
-    ["a tenant without a valid slug", (m: any) => (m.tenant = { id: TENANT_ID, slug: "Bad Slug" })],
+    ["a tenant id that is not a UUID", (m: any) => (m.tenant = { id: "curso-demo", slug: "curso-demo", state: "provisioned" })],
+    ["an uppercase UUID", (m: any) => (m.tenant = { id: TENANT_ID.toUpperCase(), slug: "curso-demo", state: "provisioned" })],
+    ["a tenant without a valid slug", (m: any) => (m.tenant = { id: TENANT_ID, slug: "Bad Slug", state: "provisioned" })],
+    ["a tenant whose provisioning did not finish", (m: any) => (m.tenant = { id: TENANT_ID, slug: "curso-demo", state: "provisioning" })],
+    ["a tenant with no state", (m: any) => (m.tenant = { id: TENANT_ID, slug: "curso-demo" })],
   ])("refuses a manifest with %s", (_name, tweak) => {
     const { dir, run, out } = setup(undefined, tweak);
     expect(run(dir)).toBe(1);
