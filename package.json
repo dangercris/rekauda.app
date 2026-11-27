@@ -32,6 +32,7 @@
     "pilot:export": "node scripts/cloud-wrangler.mjs pilot:export",
     "pilot:cleanup": "node scripts/cloud-wrangler.mjs pilot:cleanup",
     "pilot:import:plan": "node scripts/cloud-wrangler.mjs pilot:import:plan",
+    "pilot:demo-workdir": "node scripts/cloud-wrangler.mjs pilot:demo-workdir",
     "prod:import": "node scripts/cloud-wrangler.mjs prod:import",
     "prod:validate": "node scripts/cloud-wrangler.mjs prod:validate",
     "prod:undo-data": "node scripts/cloud-wrangler.mjs prod:undo-data",
