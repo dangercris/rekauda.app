@@ -31,7 +31,10 @@
     "pilot:export": "node scripts/cloud-wrangler.mjs pilot:export",
     "pilot:cleanup": "node scripts/cloud-wrangler.mjs pilot:cleanup",
     "pilot:import:plan": "node scripts/cloud-wrangler.mjs pilot:import:plan",
-    "prod:import": "node scripts/cloud-wrangler.mjs prod:import"
+    "prod:import": "node scripts/cloud-wrangler.mjs prod:import",
+    "prod:validate": "node scripts/cloud-wrangler.mjs prod:validate",
+    "prod:undo-data": "node scripts/cloud-wrangler.mjs prod:undo-data",
+    "prod:undo-tenant": "node scripts/cloud-wrangler.mjs prod:undo-tenant"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^8.0.0",

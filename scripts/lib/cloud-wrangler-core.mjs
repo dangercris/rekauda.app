@@ -18,6 +18,8 @@ import { confirmTyped } from "./confirm.mjs";
 import { runImport } from "./import/apply.mjs";
 import { runImportPlan } from "./import/plan.mjs";
 import { SLUG, UUID } from "./import/target.mjs";
+import { runUndo } from "./import/undo.mjs";
+import { runValidate } from "./import/validate.mjs";
 import { runPilotCleanup, runPilotExport } from "./pilot-export.mjs";
 import { openWorkdir } from "./private-workdir.mjs";
 
@@ -43,6 +45,10 @@ const PRODUCTION_COMMANDS = {
  */
 const DATA_COMMANDS = {
   "prod:import": { phrase: "IMPORT", workdir: true, usage: "<workdir> <tenant-id> <slug>", methods: ["select", "file"], run: runImport },
+  "prod:validate": { phrase: "VALIDATE", workdir: true, usage: "<workdir> <tenant-id> <slug>", methods: ["select"], run: runValidate },
+  // The undo takes the workdir too: it refuses unless everything in the tenant is part of the import plan.
+  "prod:undo-data": { phrase: "UNDO DATA", workdir: true, usage: "<workdir> <tenant-id> <slug>", methods: ["select", "mutate"], run: (args, ctx) => runUndo({ ...args, tenantLevel: false }, ctx) },
+  "prod:undo-tenant": { phrase: "UNDO TENANT", workdir: true, usage: "<workdir> <tenant-id> <slug>", methods: ["select", "mutate"], run: (args, ctx) => runUndo({ ...args, tenantLevel: true }, ctx) },
 };
 const D1_ACTIONS = ["execute", "migrations"];
 const FORBIDDEN_LONG = ["--remote", "--config", "--env", "--env-file", "--persist-to", "--local"];
@@ -145,8 +151,12 @@ function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confir
   return run([{ bin: viteBin, argv: ["build"] }, wrangler("deploy", ...PRODUCTION_CONFIG)]);
 }
 
+// What `mutate` accepts: one DELETE on a tenant table, naming a tenant UUID and the pilot_import source guard.
+const MUTABLE = /^DELETE FROM (bank_movements|students|payments|collections|sessions|magic_links|memberships|users|tenant_domains|tenants) WHERE /;
+const UUID_LITERAL = /'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'/;
+
 /**
- * The remote of the production data commands: `select` runs ONE SELECT, `file` runs the plan file, both as the fixed argv
+ * The remote of the production data commands: `select` runs ONE SELECT, `mutate` ONE scoped DELETE (the undo), `file` runs the plan file, all as the fixed argv
  * against the fixed production config. The guard runs again before every spawn and the config must be unchanged. stdout and
  * stderr are captured and never shown (they can hold personal data). Failures are generic.
  */
@@ -167,6 +177,10 @@ export function productionRemote({ root, bin, spawn, env, log, checkFn, target, 
       const entry = Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : undefined;
       if (entry?.success !== true || !Array.isArray(entry.results) || entry.results.some((r) => r === null || typeof r !== "object" || Array.isArray(r))) throw new Error("unexpected result shape");
       return entry.results;
+    },
+    mutate(sql) {
+      if (!MUTABLE.test(sql) || !sql.includes(" source = 'pilot_import'") || !UUID_LITERAL.test(sql) || !sql.endsWith(";") || sql.slice(0, -1).includes(";")) throw new Error("not a single scoped DELETE");
+      invoke("--command", sql);
     },
     file(path) {
       if (basename(path) !== "import.sql") throw new Error("not the import plan");

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const dir = new URL(".", import.meta.url).pathname;
 /** The methods of the remote each production data command may use. Changing this table is a reviewed decision. */
-const EXPECTED_METHODS: Record<string, string[]> = { "prod:import": ["select", "file"] };
+const EXPECTED_METHODS: Record<string, string[]> = { "prod:import": ["select", "file"], "prod:validate": ["select"], "prod:undo-data": ["select", "mutate"], "prod:undo-tenant": ["select", "mutate"] };
 
 function files(base: string): string[] {
   return readdirSync(base, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(base, e.name)) : [join(base, e.name)]));
@@ -134,12 +134,12 @@ describe("the production data path (reads and the import file)", () => {
   const remote = wrapper.slice(from, wrapper.indexOf("\n}\n", from));
   const code = (text: string) => text.split("\n").filter((l) => !l.trimStart().startsWith("//"));
 
-  it("has one spawn, one fixed argv with the production config, and only the --command and --file flags", () => {
+  it("has one spawn, one fixed argv with the production config, and only the --command and --file flags (select, mutate, file)", () => {
     expect(code(remote).filter((l) => /\bspawn\(/.test(l))).toHaveLength(1);
     const argv = code(remote).filter((l) => l.includes('"--remote"'));
     expect(argv).toHaveLength(1);
     expect(argv[0]).toContain('["d1", "execute", "DB", "--remote", "--json", ...PRODUCTION_CONFIG, flag, value]');
-    expect([...remote.matchAll(/invoke\("(--[a-z]+)"/g)].map((m) => m[1]).sort()).toEqual(["--command", "--file"]);
+    expect([...remote.matchAll(/invoke\("(--[a-z]+)"/g)].map((m) => m[1]).sort()).toEqual(["--command", "--command", "--file"]);
     expect(remote).not.toMatch(/\bshell\s*:|stdio: "inherit"|stdio: \[[^\]]*"inherit"/);
   });
 
@@ -148,10 +148,21 @@ describe("the production data path (reads and the import file)", () => {
     expect(remote).toContain('basename(path) !== "import.sql"');
   });
 
+  it("mutate accepts one scoped DELETE only: allowed table, a tenant UUID and the pilot_import guard", () => {
+    expect(remote).toContain("!MUTABLE.test(sql) || !sql.includes(\" source = 'pilot_import'\") || !UUID_LITERAL.test(sql) || !sql.endsWith(\";\") || sql.slice(0, -1).includes(\";\")");
+    expect(wrapper).toMatch(/const MUTABLE = \/\^DELETE FROM \(bank_movements\|students\|payments\|collections\|sessions\|magic_links\|memberships\|users\|tenant_domains\|tenants\) WHERE \//);
+  });
+
+
   // Every remote.<method>( call site in the import modules, and nothing else may reach the remote.
-  const ALLOWED = { "lib/import/target.mjs": ["select", "select", "select"], "lib/import/apply.mjs": ["file"] } as Record<string, string[]>;
+  const ALLOWED = {
+    "lib/import/target.mjs": ["select", "select", "select"],
+    "lib/import/apply.mjs": ["file"],
+    "lib/import/validate.mjs": ["select"],
+    "lib/import/undo.mjs": ["select", "select", "mutate", "select"],
+  } as Record<string, string[]>;
   const importSources = sources.filter((s) => s.name.startsWith("lib/import/"));
-  it("only target.mjs reads and only apply.mjs executes, at exactly the allowed call sites", () => {
+  it("only these modules reach the remote, at exactly the allowed call sites", () => {
     const found = Object.fromEntries(importSources.map((s) => [s.name, [...code(s.text).join("\n").matchAll(/\bremote\.(\w+)\(/g)].map((m) => m[1])]).filter(([, calls]) => (calls as string[]).length > 0));
     expect(found).toEqual(ALLOWED);
   });
@@ -160,7 +171,39 @@ describe("the production data path (reads and the import file)", () => {
     const target = sources.find((s) => s.name === "lib/import/target.mjs")!.text;
     for (const line of code(target).filter((l) => l.includes("remote.select("))) expect(line).toMatch(/remote\.select\((`SELECT |sql\))/);
     expect(code(target).join("\n")).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/i);
+    for (const name of ["lib/import/validate.mjs", "lib/import/undo.mjs"]) {
+      const text = sources.find((s) => s.name === name)!.text;
+      for (const line of code(text).filter((l) => l.includes("remote.select("))) expect(line, name).toMatch(/remote\.select\(`SELECT /);
+      expect(code(text).join("\n"), name).not.toMatch(/\b(INSERT|UPDATE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/i);
+    }
   });
+
+  // Every DELETE line must carry the pilot_import guard (a shared GUARD helper or the literal), and a user delete must also
+  // carry the other-membership clause. The checker itself is proven by fixtures with a guard removed.
+  const deleteProblems = (line: string): string[] => {
+    const problems: string[] = [];
+    if (!line.includes("source = 'pilot_import'") && !line.includes("${GUARD(")) problems.push("no pilot_import guard");
+    if (!/WHERE (tenant_id|id) = '\$\{(id|tenantId|u)\}'/.test(line)) problems.push("not scoped");
+    if (line.includes("DELETE FROM users") && !line.includes("NOT EXISTS (SELECT 1 FROM memberships WHERE user_id = '${u}')")) problems.push("no other-membership clause");
+    return problems;
+  };
+
+  it("the only DELETE statements live in undo.mjs, and every one carries its guards", () => {
+    for (const s of importSources.filter((i) => !i.name.endsWith("undo.mjs"))) expect(code(s.text).join("\n"), s.name).not.toMatch(/\bDELETE\b/);
+    const lines = code(sources.find((s) => s.name === "lib/import/undo.mjs")!.text).filter((l) => /DELETE FROM/.test(l));
+    expect(lines.length).toBe(3);
+    for (const line of lines) expect(deleteProblems(line), line).toEqual([]);
+  });
+
+  it("the DELETE checker fails when a guard is removed from a line", () => {
+    const good = "const users = `DELETE FROM users WHERE id = '${u}' AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id = '${u}') AND ${GUARD(tenantId)};`;";
+    expect(deleteProblems(good)).toEqual([]);
+    expect(deleteProblems(good.replace(" AND ${GUARD(tenantId)}", ""))).toContain("no pilot_import guard");
+    expect(deleteProblems(good.replace(" AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id = '${u}')", ""))).toContain("no other-membership clause");
+    expect(deleteProblems("`DELETE FROM payments WHERE 1 = 1 AND ${GUARD(id)};`")).toContain("not scoped");
+    expect(deleteProblems("`DELETE FROM tenants WHERE id = '${tenantId}';`")).toContain("no pilot_import guard");
+  });
+
 });
 
 describe("the remote is used only in its plain form, in every module the data commands import", () => {

@@ -49,6 +49,25 @@ export function loadPlanState(dir, manifest, tenantId) {
   }
 }
 
+/**
+ * The ids of the plan, for the undo: which rows an import of THIS plan can have created. Only needs the plan record to be
+ * for this tenant and its export file to hash as recorded (a newer export does not matter: the undo must still work then).
+ * Returns { ids: { collections, payments, bank_movements } as Sets, students: count }. Throws a generic error otherwise.
+ */
+export function loadPlanIds(dir, manifest, tenantId) {
+  const plan = manifest?.plan;
+  if (!plan || plan.file !== PLAN_FILE || plan.tenantId !== tenantId || typeof plan.exportFile !== "string") throw new Error("no plan");
+  const tables = JSON.parse(readFileSync(join(dir, plan.exportFile), "utf8")).tables;
+  if (canonicalHash(tables) !== plan.exportHash) throw new Error("no plan");
+  const db = loadSnapshot(tables);
+  try {
+    const cloud = transform(db, { tenantId });
+    return { ids: Object.fromEntries(["collections", "payments", "bank_movements"].map((t) => [t, new Set(cloud[t].map((row) => row.id))])), students: cloud.students.length };
+  } finally {
+    db.close();
+  }
+}
+
 /** Writes through a temp file created exclusively (O_EXCL) with mode 0600, then renames it into place. */
 function writePlan(path, text) {
   const temp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
