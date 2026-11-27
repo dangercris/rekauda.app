@@ -365,6 +365,26 @@ describe("runProvision", () => {
       expect(readManifest(w.dir).tenant).toBeUndefined();
     });
 
+    it("an account registered with the owner email after the read is refused at read-back, recorded for undo, and kept by undo", () => {
+      const w = world();
+      const fake = fakeRemote();
+      const racing = {
+        ...fake.remote,
+        insert: (sql: string) => {
+          if (sql.startsWith("INSERT INTO tenants")) fake.db.sqlite.exec("INSERT INTO users (id, email, kind, created_at) VALUES ('u-race', 'owner@example.test', 'person', 'x')");
+          fake.remote.insert(sql);
+        },
+      };
+      const { status, out } = run(w, racing);
+      expect(status).toBe(1);
+      expect(out).toMatch(/was registered with the owner email/i);
+      expect(out).not.toMatch(/owner@example/);
+      expect(readManifest(w.dir).tenant).toEqual({ id: TENANT_ID, slug: "curso-demo", state: "provisioning", reusedOwnerId: "u-race" });
+      expect(existsSync(join(w.dir, "handover.txt"))).toBe(false);
+      expect(undoOf(w, fake)).toBe(0);
+      expect(users(fake)).toEqual(["u-race"]);
+    });
+
     it("deletes an owner that provisioning created", () => {
       const w = world();
       const fake = fakeRemote();

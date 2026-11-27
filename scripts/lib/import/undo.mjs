@@ -45,7 +45,8 @@ function recordedUsers(dir) {
 /** The existing account provisioning reused as owner, which undo must never delete. `undefined` when the owner was created by provisioning; throws when the manifest says an owner was reused but the id is unreadable. */
 function reusedOwner(manifest, tenantId) {
   const tenant = manifest?.tenant;
-  if (!tenant || tenant.id !== tenantId || !Object.hasOwn(tenant, "reusedOwnerId")) return undefined;
+  if (!tenant || !Object.hasOwn(tenant, "reusedOwnerId")) return undefined;
+  if (tenant.id !== tenantId) throw new Error("reusedOwnerId belongs to another tenant");
   if (typeof tenant.reusedOwnerId !== "string" || !PLAIN_ID.test(tenant.reusedOwnerId)) throw new Error("malformed reusedOwnerId");
   return tenant.reusedOwnerId;
 }
@@ -66,7 +67,7 @@ export function runUndo({ dir, manifest, tenantId, slug, tenantLevel }, { remote
   try {
     kept = tenantLevel ? reusedOwner(manifest, tenantId) : undefined;
   } catch {
-    return refuse("the manifest says an owner was reused but its id cannot be read. Nothing was deleted; check the workdir manifest.");
+    return refuse("the manifest says an owner was reused but its id cannot be read, or it belongs to another tenant. Nothing was deleted; check the workdir manifest.");
   }
   const spare = (ids) => ids.filter((id) => id !== kept);
   let statements = [];

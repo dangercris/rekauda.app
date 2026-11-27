@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { NOW, OTHER, SLUG, makePilotWorld } from "./pilot-world";
@@ -238,6 +238,38 @@ describe("undo-tenant of a tenant that has no import plan (a provisioning that d
     expect(w.one(`SELECT COUNT(*) AS n FROM users WHERE id = '${SOLE}'`)).toBe(0);
     expect(w.one(`SELECT COUNT(*) AS n FROM tenants WHERE id = '${TENANT_ID}'`)).toBe(0);
     expect(readFileSync(join(w.dir, "undo-users.json"), "utf8")).not.toContain(OWNER);
+  });
+
+  it("drops the reused id from a stale undo-users.json written by an earlier run", () => {
+    const w = unfinished();
+    const m = readManifest(w.dir);
+    m.tenant.reusedOwnerId = OWNER;
+    writeManifest(w.dir, m);
+    writeFileSync(join(w.dir, "undo-users.json"), JSON.stringify([OWNER, SOLE]));
+    expect(w.undo(true)).toBe(0);
+    expect(w.one(`SELECT COUNT(*) AS n FROM users WHERE id = '${OWNER}'`)).toBe(1);
+    expect(w.one(`SELECT COUNT(*) AS n FROM users WHERE id = '${SOLE}'`)).toBe(0);
+  });
+
+  it("a rerun after the tenant row is gone keeps the reused owner and still verifies", () => {
+    const w = imported({ plan: false, tenant: null });
+    const m = readManifest(w.dir);
+    m.tenant = { id: TENANT_ID, slug: SLUG, state: "provisioning", reusedOwnerId: OWNER };
+    writeManifest(w.dir, m);
+    writeFileSync(join(w.dir, "undo-users.json"), JSON.stringify([OWNER]));
+    expect(w.undo(true)).toBe(0);
+    expect(w.one(`SELECT COUNT(*) AS n FROM users WHERE id = '${OWNER}'`)).toBe(1);
+    expect(readManifest(w.dir).tenant).toBeUndefined();
+  });
+
+  it("refuses, deleting nothing, when the manifest has a reused owner but names another tenant", () => {
+    const w = imported();
+    const m = readManifest(w.dir);
+    m.tenant = { id: OTHER, slug: "otro-curso", state: "provisioned", reusedOwnerId: OWNER };
+    writeManifest(w.dir, m);
+    expect(w.undo(true)).toBe(1);
+    expect(w.statements).toEqual([]);
+    expect(w.one(`SELECT COUNT(*) AS n FROM tenants WHERE id = '${TENANT_ID}'`)).toBe(1);
   });
 
   it.each([[null], [""], [42], ["x'; DROP TABLE users; --"], [["a"]]])("refuses, deleting nothing, when the manifest says an owner was reused but the id is malformed (%j)", (bad) => {
