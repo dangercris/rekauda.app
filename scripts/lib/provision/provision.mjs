@@ -97,7 +97,7 @@ function provision({ dir, tenantId, ownerId, slug, prepared, reuseOwner }, { rem
     // The address is handed over only now: a failed run never leaves a dead inbound address behind.
     const handover = writeHandover(dir, address);
     writeManifest(dir, { ...readManifest(dir), tenant: { id: tenantId, slug, state: "provisioned", ...(reusedOwnerId === undefined ? {} : { reusedOwnerId }) } });
-    log.log(`[provision] tenant=${tenantId} slug=${slug} provisioned. The inbound address is in ${handover} (mode 0600). Next: pilot:import:plan <workdir>.`);
+    log.log(`[provision] tenant=${tenantId} slug=${slug} provisioned${reusedOwnerId === undefined ? "" : ` reusedOwnerId=${reusedOwnerId}`}. The inbound address is in ${handover} (mode 0600). Next: pilot:import:plan <workdir>.`);
     return 0;
   } catch {
     log.error(`[provision] FAILED: the tenant may be partly provisioned (no details are shown on purpose). tenant=${tenantId}. If it has no data, run prod:undo-tenant for it, then follow the runbook before trying again.`);

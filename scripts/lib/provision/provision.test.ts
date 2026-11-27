@@ -395,6 +395,16 @@ describe("runProvision", () => {
     });
   });
 
+  it("prints the reused owner id (never the email) in the success line, and nothing extra for a new owner", () => {
+    const reused = world();
+    const first = fakeRemote();
+    first.db.sqlite.exec("INSERT INTO users (id, email, kind, created_at) VALUES ('u-old', 'owner@example.test', 'person', 'x')");
+    const a = run(reused, first.remote, {}, true);
+    expect(a.out).toMatch(/reusedOwnerId=u-old/);
+    expect(a.out).not.toMatch(/owner@example/);
+    expect(run(world(), fakeRemote().remote).out).not.toMatch(/reusedOwnerId/);
+  });
+
   it("refuses the reuse phrase when there is no existing account", () => {
     const w = world();
     const { remote, calls } = fakeRemote();
