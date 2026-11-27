@@ -1,6 +1,6 @@
 // Loads the files the guard needs and runs the pure core. Any read or parse error propagates (callers fail closed).
 import { existsSync, readFileSync } from "node:fs";
-import { checkCloudConfig, checkSandboxConfig } from "./cloud-guard-core.mjs";
+import { checkCloudConfig, checkProductionConfig, checkSandboxConfig } from "./cloud-guard-core.mjs";
 import { parseJsonc } from "./jsonc.mjs";
 
 // Duplicate keys are refused: wrangler and this parser could otherwise disagree on which value wins.
@@ -32,6 +32,26 @@ export function loadAndCheckSandbox({ root }) {
     pilot: readIfExists(root + "wrangler.jsonc", readJsonc),
     pilotExample: readIfExists(root + "wrangler.example.jsonc", readJsonc),
     extraDenylist: readIfExists(root + ".pilot-resources.json", (p) => JSON.parse(readFileSync(p, "utf8"))),
+  });
+  return { result, target };
+}
+
+const PRODUCTION_CONFIG_FILE = "wrangler.production.jsonc";
+
+/**
+ * Production remote check. The target file is fixed (root + wrangler.production.jsonc), never auto-created.
+ * `apex` is "forbid" | "require" | "any". Returns { result, target } like the sandbox loader.
+ */
+export function loadAndCheckProduction({ root, apex }) {
+  const target = readJsonc(root + PRODUCTION_CONFIG_FILE);
+  const result = checkProductionConfig({
+    target,
+    targetFile: PRODUCTION_CONFIG_FILE,
+    pilot: readIfExists(root + "wrangler.jsonc", readJsonc),
+    pilotExample: readIfExists(root + "wrangler.example.jsonc", readJsonc),
+    sandbox: readIfExists(root + "wrangler.sandbox.jsonc", readJsonc),
+    extraDenylist: readIfExists(root + ".pilot-resources.json", (p) => JSON.parse(readFileSync(p, "utf8"))),
+    apex,
   });
   return { result, target };
 }
