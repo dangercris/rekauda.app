@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const dir = new URL(".", import.meta.url).pathname;
 /** The methods of the remote each production data command may use. Changing this table is a reviewed decision. */
-const EXPECTED_METHODS: Record<string, string[]> = { "prod:import": ["select", "file"], "prod:validate": ["select"], "prod:undo-data": ["select", "mutate"], "prod:undo-tenant": ["select", "mutate"] };
+const EXPECTED_METHODS: Record<string, string[]> = { "prod:import": ["select", "file"], "prod:validate": ["select"], "prod:undo-data": ["select", "mutate"], "prod:undo-tenant": ["select", "mutate"], "prod:provision": ["select", "insert", "put"] };
 
 function files(base: string): string[] {
   return readdirSync(base, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(base, e.name)) : [join(base, e.name)]));
@@ -136,12 +136,14 @@ describe("the production data path (reads and the import file)", () => {
   const remote = wrapper.slice(from, wrapper.indexOf("\n}\n", from));
   const code = (text: string) => text.split("\n").filter((l) => !l.trimStart().startsWith("//"));
 
-  it("has one spawn, one fixed argv with the production config, and only the --command and --file flags (select, mutate, file)", () => {
+  it("has one spawn and two fixed argv, both with the production config: d1 execute (--command, --file) and the one QR upload", () => {
     expect(code(remote).filter((l) => /\bspawn\(/.test(l))).toHaveLength(1);
     const argv = code(remote).filter((l) => l.includes('"--remote"'));
-    expect(argv).toHaveLength(1);
+    expect(argv).toHaveLength(2);
     expect(argv[0]).toContain('["d1", "execute", "DB", "--remote", "--json", ...PRODUCTION_CONFIG, flag, value]');
-    expect([...remote.matchAll(/invoke\("(--[a-z]+)"/g)].map((m) => m[1]).sort()).toEqual(["--command", "--command", "--file"]);
+    expect(argv[1]).toContain('["r2", "object", "put", `${bucket}/t/${tenantId}/assets/deuna-qr.${ext}`, "--file", file, "--content-type", contentType, "--remote", ...PRODUCTION_CONFIG]');
+    expect([...remote.matchAll(/invoke\("(--[a-z]+)"/g)].map((m) => m[1]).sort()).toEqual(["--command", "--command", "--command", "--file"]);
+    expect(code(remote).filter((l) => /\bexec\(/.test(l)).length).toBe(2);
     expect(remote).not.toMatch(/\bshell\s*:|stdio: "inherit"|stdio: \[[^\]]*"inherit"/);
   });
 
@@ -155,6 +157,13 @@ describe("the production data path (reads and the import file)", () => {
     expect(wrapper).toMatch(/const MUTABLE = \/\^DELETE FROM \(bank_movements\|students\|payments\|collections\|sessions\|magic_links\|memberships\|users\|tenant_domains\|tenants\) WHERE \//);
   });
 
+
+  it("insert accepts one tenant INSERT only (allowed table, tenant UUID, single statement, pilot_import source), put only the staged QR into the receipts bucket", () => {
+    expect(remote).toContain("!INSERTABLE.test(sql) || !UUID_LITERAL.test(sql) || !isSingleStatement(sql) || (sql.startsWith(\"INSERT INTO tenants \") && !TENANT_SOURCE.test(sql))");
+    expect(wrapper).toContain("const INSERTABLE = /^INSERT INTO (tenants|tenant_domains|users|memberships) \\(/;");
+    expect(remote).toContain('b.binding === "RECEIPTS"');
+    expect(remote).toContain("!UUID.test(tenantId) || !Object.hasOwn(QR_TYPES, ext) || QR_TYPES[ext] !== contentType || !isAbsolute(file) || basename(file) !== `deuna-qr.${ext}`");
+  });
 
   // Every remote.<method>( call site in the data modules (import and provision), and nothing else may reach the remote.
   const ALLOWED = {
