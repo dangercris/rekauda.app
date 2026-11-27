@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const dir = new URL(".", import.meta.url).pathname;
+/** The methods of the remote each production data command may use. Changing this table is a reviewed decision. */
+const EXPECTED_METHODS: Record<string, string[]> = { "prod:import": ["select", "file"] };
 
 function files(base: string): string[] {
   return readdirSync(base, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(base, e.name)) : [join(base, e.name)]));
@@ -158,6 +160,36 @@ describe("the production data path (reads and the import file)", () => {
     const target = sources.find((s) => s.name === "lib/import/target.mjs")!.text;
     for (const line of code(target).filter((l) => l.includes("remote.select("))) expect(line).toMatch(/remote\.select\((`SELECT |sql\))/);
     expect(code(target).join("\n")).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/i);
+  });
+});
+
+describe("the remote is used only in its plain form, in every module the data commands import", () => {
+  const wrapper = sources.find((s) => s.name === "lib/cloud-wrangler-core.mjs")!.text;
+  const code = (text: string) => text.split("\n").filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join("\n");
+  // Anything but `remote.<method>(` is a way to hide a call from the call-site allowlist.
+  const SNEAKY = [/\bremote\s*\?\./, /\bremote\s*\[/, /=\s*remote\b(?!\.\w+\()/, /\.\.\.remote\b/, /\bremote\.(?!\w+\()/, /(?<!\bremote)\.(select|mutate|file)\(/];
+  const violations = (text: string) => SNEAKY.filter((re) => re.test(code(text)));
+
+  it("pins the data commands and the methods each one gets (least privilege)", () => {
+    const block = wrapper.slice(wrapper.indexOf("const DATA_COMMANDS = {"), wrapper.indexOf("\n};\n", wrapper.indexOf("const DATA_COMMANDS = {")));
+    const entries = [...block.matchAll(/^ {2}"(prod:[a-z-]+)": \{.*methods: (\[[^\]]*\])/gm)].map((m) => [m[1], JSON.parse(m[2]!.replaceAll("'", '"'))]);
+    expect(Object.fromEntries(entries)).toEqual(EXPECTED_METHODS);
+    expect([...block.matchAll(/^ {2}"(prod:[a-z-]+)":/gm)].map((m) => m[1])).toEqual(Object.keys(EXPECTED_METHODS));
+  });
+
+  it("scans every module imported from ./import/ by the wrapper", () => {
+    const imported = [...wrapper.matchAll(/from "\.\/import\/([a-z-]+)\.mjs"/g)].map((m) => `lib/import/${m[1]}.mjs`);
+    expect(imported.length).toBeGreaterThanOrEqual(3);
+    for (const name of imported) {
+      const text = sources.find((s) => s.name === name)?.text;
+      expect(text, name).toBeDefined();
+      expect(violations(text!), name).toEqual([]);
+    }
+  });
+
+  it("catches every way of hiding a call (the fixtures must fail)", () => {
+    for (const bad of ["remote?.mutate(sql);", 'remote["mutate"](sql);', "const { mutate } = remote;", "const r = remote;", "const f = remote.file;", "run(...remote);", "remote.select.call(x, sql);", "other.mutate(sql);"]) expect(violations(bad), bad).not.toEqual([]);
+    for (const good of ["remote.select(sql);", "targetVerdict(remote, plan);", "export function runX({ a }, { remote, log = console }) {", "if (x) remote.file(path);", "const rows = remote.select(sql);"]) expect(violations(good), good).toEqual([]);
   });
 });
 
