@@ -1,11 +1,10 @@
 import { PlatformDb } from "../data/platform-db";
 import { parseInstanceConfig } from "../../shared/instance-validation";
 import { isValidSlug } from "./host";
+import { OWNER_EMAIL } from "./provision-sql";
 import type { ProvisionTenantInput } from "./provision-tenant-input";
 import type { Tenant } from "./tenant";
 import type { TenantProvisioner } from "./tenant-provisioner";
-
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Provisions through PlatformDb (the data path that runs before a tenant exists). Validates everything before the single atomic write. */
 export class D1TenantProvisioner implements TenantProvisioner {
@@ -18,7 +17,7 @@ export class D1TenantProvisioner implements TenantProvisioner {
   async provision(input: ProvisionTenantInput): Promise<Tenant> {
     if (!isValidSlug(input.slug)) throw new Error("Invalid slug: it must be 3-40 DNS-safe lowercase characters and not reserved.");
     const email = input.ownerEmail.trim().toLowerCase();
-    if (!EMAIL.test(email)) throw new Error("Invalid owner email.");
+    if (!OWNER_EMAIL.test(email)) throw new Error("Invalid owner email.");
     const config = parseInstanceConfig(input.config, "tenant config");
     const id = crypto.randomUUID();
     const created = await this.platform.createCloudTenant({
