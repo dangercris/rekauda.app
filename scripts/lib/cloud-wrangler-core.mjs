@@ -18,6 +18,8 @@ import { confirmTyped } from "./confirm.mjs";
 import { runImport } from "./import/apply.mjs";
 import { runImportPlan } from "./import/plan.mjs";
 import { SLUG, UUID } from "./import/target.mjs";
+import { runUndo } from "./import/undo.mjs";
+import { runValidate } from "./import/validate.mjs";
 import { runPilotCleanup, runPilotExport } from "./pilot-export.mjs";
 import { openWorkdir } from "./private-workdir.mjs";
 
@@ -43,6 +45,10 @@ const PRODUCTION_COMMANDS = {
  */
 const DATA_COMMANDS = {
   "prod:import": { phrase: "IMPORT", workdir: true, usage: "<workdir> <tenant-id> <slug>", run: runImport },
+  "prod:validate": { phrase: "VALIDATE", workdir: true, usage: "<workdir> <tenant-id> <slug>", run: runValidate },
+  // The undo needs no workdir, so it still works after pilot:cleanup.
+  "prod:undo-data": { phrase: "UNDO DATA", workdir: false, usage: "<tenant-id> <slug>", run: (args, ctx) => runUndo({ ...args, tenantLevel: false }, ctx) },
+  "prod:undo-tenant": { phrase: "UNDO TENANT", workdir: false, usage: "<tenant-id> <slug>", run: (args, ctx) => runUndo({ ...args, tenantLevel: true }, ctx) },
 };
 const D1_ACTIONS = ["execute", "migrations"];
 const FORBIDDEN_LONG = ["--remote", "--config", "--env", "--env-file", "--persist-to", "--local"];
@@ -127,7 +133,7 @@ function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confir
 }
 
 /**
- * The remote of the production data commands: `select` runs ONE SELECT, `file` runs the plan file, both as the fixed argv
+ * The remote of the production data commands: `select` runs ONE SELECT, `mutate` ONE scoped DELETE (the undo), `file` runs the plan file, all as the fixed argv
  * against the fixed production config. The guard runs again before every spawn and the config must be unchanged. stdout and
  * stderr are captured and never shown (they can hold personal data). Failures are generic.
  */
@@ -148,6 +154,10 @@ function productionRemote({ root, bin, spawn, env, log, checkFn, target }) {
       const entry = Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : undefined;
       if (entry?.success !== true || !Array.isArray(entry.results) || entry.results.some((r) => r === null || typeof r !== "object" || Array.isArray(r))) throw new Error("unexpected result shape");
       return entry.results;
+    },
+    mutate(sql) {
+      if (!/^DELETE FROM [a-z_]+ WHERE /.test(sql) || !sql.endsWith(";") || sql.slice(0, -1).includes(";")) throw new Error("not a single DELETE");
+      invoke("--command", sql);
     },
     file(path) {
       if (basename(path) !== "import.sql") throw new Error("not the import plan");
