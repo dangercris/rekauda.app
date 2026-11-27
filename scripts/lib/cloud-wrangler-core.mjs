@@ -11,12 +11,15 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { buildSandboxSeedSql } from "./cloud-sandbox-seed.mjs";
 import { loadAndCheck, loadAndCheckProduction, loadAndCheckSandbox, report } from "./cloud-guard-io.mjs";
 import { confirmTyped } from "./confirm.mjs";
+import { runImport } from "./import/apply.mjs";
 import { runImportPlan } from "./import/plan.mjs";
+import { SLUG, UUID } from "./import/target.mjs";
 import { runPilotCleanup, runPilotExport } from "./pilot-export.mjs";
+import { openWorkdir } from "./private-workdir.mjs";
 
 const SUBCOMMANDS = ["dev", "d1", "types"];
 const SANDBOX_SUBCOMMANDS = ["sandbox:migrate", "sandbox:seed", "sandbox:deploy", "sandbox:status"];
@@ -33,6 +36,13 @@ const PRODUCTION_COMMANDS = {
   "prod:deploy": { apex: "any", phrase: "DEPLOY PRODUCTION" },
   "prod:switch-apex": { apex: "require", phrase: "SWITCH APEX" },
   "prod:status": { apex: "any", phrase: undefined },
+};
+/**
+ * Production data commands (they take arguments, unlike PRODUCTION_COMMANDS). The typed phrase always ends with the slug, and
+ * the worker, account and root are printed before it is asked for. Each one runs its steps through productionRemote.
+ */
+const DATA_COMMANDS = {
+  "prod:import": { phrase: "IMPORT", workdir: true, usage: "<workdir> <tenant-id> <slug>", methods: ["select", "file"], run: runImport },
 };
 const D1_ACTIONS = ["execute", "migrations"];
 const FORBIDDEN_LONG = ["--remote", "--config", "--env", "--env-file", "--persist-to", "--local"];
@@ -57,7 +67,13 @@ const scrubbedEnv = (env) => Object.fromEntries(SANDBOX_ENV_KEYS.filter((key) =>
  */
 function runSteps(steps, { root, spawn, log, env, checked, checkFn = loadAndCheckSandbox }) {
   for (const { bin, argv } of steps) {
-    const again = checkFn({ root });
+    let again;
+    try {
+      again = checkFn({ root });
+    } catch {
+      log.error("[cloud-wrangler] REFUSED: the config could not be read again before the command ran.");
+      return 1;
+    }
     report(again.result, log);
     if (!again.result.ok) return 1;
     if (JSON.stringify(again.target) !== checked) {
@@ -93,13 +109,26 @@ function runSandbox(subcommand, { root, bin, viteBin, spawn, log, now, env }) {
   }
 }
 
+/** First guard run of a production command. A missing or unparseable config is a generic refusal, never a stack trace. */
+function firstCheck(checkFn, root, log) {
+  let checked;
+  try {
+    checked = checkFn({ root });
+  } catch {
+    log.error("[cloud-wrangler] REFUSED: the production config could not be read or parsed.");
+    return undefined;
+  }
+  report(checked.result, log);
+  return checked.result.ok ? checked : undefined;
+}
+
 /** Runs a production subcommand: guard with the command's apex policy, typed phrase, then fixed argv with a scrubbed env. */
 function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confirm }) {
   const { apex, phrase: basePhrase } = PRODUCTION_COMMANDS[subcommand];
   const checkFn = ({ root: r }) => loadAndCheckProduction({ root: r, apex });
-  const { result, target } = checkFn({ root });
-  report(result, log);
-  if (!result.ok) return 1;
+  const checked = firstCheck(checkFn, root, log);
+  if (!checked) return 1;
+  const { target } = checked;
   const phrase = subcommand === "prod:deploy" && Array.isArray(target.routes) && target.routes.length > 1 ? PRODUCTION_COMMANDS["prod:switch-apex"].phrase : basePhrase;
   if (phrase !== undefined) {
     // What the operator is about to confirm: names only, never a token.
@@ -116,14 +145,71 @@ function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confir
   return run([{ bin: viteBin, argv: ["build"] }, wrangler("deploy", ...PRODUCTION_CONFIG)]);
 }
 
+/**
+ * The remote of the production data commands: `select` runs ONE SELECT, `file` runs the plan file, both as the fixed argv
+ * against the fixed production config. The guard runs again before every spawn and the config must be unchanged. stdout and
+ * stderr are captured and never shown (they can hold personal data). Failures are generic.
+ */
+export function productionRemote({ root, bin, spawn, env, log, checkFn, target, methods }) {
+  const checked = JSON.stringify(target);
+  const invoke = (flag, value) => {
+    const again = checkFn({ root });
+    report(again.result, log);
+    if (!again.result.ok || JSON.stringify(again.target) !== checked) throw new Error("guard");
+    const done = spawn(bin, ["d1", "execute", "DB", "--remote", "--json", ...PRODUCTION_CONFIG, flag, value], { cwd: root, env: scrubbedEnv(env), stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", maxBuffer: 512 * 1024 * 1024 });
+    if (done.error || done.status !== 0) throw new Error("remote command failed");
+    return String(done.stdout ?? "");
+  };
+  const all = {
+    select(sql) {
+      if (!sql.startsWith("SELECT ") || !sql.endsWith(";") || sql.slice(0, -1).includes(";")) throw new Error("not a single SELECT");
+      const parsed = JSON.parse(invoke("--command", sql));
+      const entry = Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : undefined;
+      if (entry?.success !== true || !Array.isArray(entry.results) || entry.results.some((r) => r === null || typeof r !== "object" || Array.isArray(r))) throw new Error("unexpected result shape");
+      return entry.results;
+    },
+    file(path) {
+      if (basename(path) !== "import.sql") throw new Error("not the import plan");
+      invoke("--file", path);
+    },
+  };
+  // Least privilege: a command gets only the methods it declared in DATA_COMMANDS.
+  return Object.fromEntries(methods.map((name) => [name, all[name]]));
+}
+
+/** Runs a production data command: arguments, guard, printed target, typed phrase with the slug, then the command's own steps. */
+function runProductionData(subcommand, args, { root, bin, spawn, log, env, confirm, tmp }) {
+  const { phrase, workdir, usage, methods, run } = DATA_COMMANDS[subcommand];
+  const refuse = (why) => (log.error(`[cloud-wrangler] REFUSED: ${subcommand} ${why}`), 1);
+  const [first, tenantId, slug] = workdir ? args : [undefined, ...args];
+  if (args.length !== (workdir ? 3 : 2) || args.some((a) => a.startsWith("-")) || !UUID.test(tenantId) || !SLUG.test(slug)) return refuse(`takes exactly: ${usage}.`);
+  let opened = {};
+  if (workdir) {
+    try {
+      opened = openWorkdir(first, { root, tmp });
+    } catch {
+      return refuse("needs a workdir created by pilot:export.");
+    }
+  }
+  const checkFn = ({ root: r }) => loadAndCheckProduction({ root: r, apex: "any" });
+  const checked = firstCheck(checkFn, root, log);
+  if (!checked) return 1;
+  const { target } = checked;
+  log.warn(`[cloud-wrangler] ${subcommand}: worker=${target.name} account=${target.account_id ?? "(not set)"} root=${target.vars.ROOT_DOMAIN} tenant=${tenantId} slug=${slug}`);
+  if (!confirm(`${phrase} ${slug}`)) return refuse("needs the typed confirmation phrase on a terminal.");
+  const remote = productionRemote({ root, bin, spawn, env, log, checkFn, target, methods });
+  return run({ ...opened, tenantId, slug }, { remote, log });
+}
+
 /** root ends with a slash. Returns the exit status. */
-export function runCloudWrangler(args, { root, bin = root + "node_modules/.bin/wrangler", viteBin = root + "node_modules/.bin/vite", spawn = spawnSync, log = console, now = () => new Date().toISOString(), env = process.env, confirm = (phrase) => confirmTyped(phrase) }) {
+export function runCloudWrangler(args, { root, bin = root + "node_modules/.bin/wrangler", viteBin = root + "node_modules/.bin/vite", spawn = spawnSync, log = console, now = () => new Date().toISOString(), env = process.env, confirm = (phrase) => confirmTyped(phrase), tmp = tmpdir() }) {
   const [subcommand, ...rest] = args;
   // The read-only pilot export lives in its own module, with its own fixed argv (see lib/pilot-export.mjs).
   if (subcommand === "pilot:export") return runPilotExport(rest, { root, bin, spawn, log, env, confirm });
   if (subcommand === "pilot:cleanup") return runPilotCleanup(rest, { root, log });
   // The import plan is local only: no wrangler, no network (see lib/import/plan.mjs).
   if (subcommand === "pilot:import:plan") return runImportPlan(rest, { root, log });
+  if (Object.hasOwn(DATA_COMMANDS, subcommand)) return runProductionData(subcommand, rest, { root, bin, spawn, log, env, confirm, tmp });
   if (Object.hasOwn(PRODUCTION_COMMANDS, subcommand)) {
     const bad = forbiddenArg(rest);
     if (bad || rest.length > 0) {
@@ -141,7 +227,7 @@ export function runCloudWrangler(args, { root, bin = root + "node_modules/.bin/w
     return runSandbox(subcommand, { root, bin, viteBin, spawn, log, now, env });
   }
   if (!SUBCOMMANDS.includes(subcommand)) {
-    log.error(`[cloud-wrangler] REFUSED: only ${[...SUBCOMMANDS, ...SANDBOX_SUBCOMMANDS, ...Object.keys(PRODUCTION_COMMANDS)].join(", ")} are allowed on this branch (plus pilot:export, pilot:cleanup and pilot:import:plan).`);
+    log.error(`[cloud-wrangler] REFUSED: only ${[...SUBCOMMANDS, ...SANDBOX_SUBCOMMANDS, ...Object.keys(PRODUCTION_COMMANDS), ...Object.keys(DATA_COMMANDS)].join(", ")} are allowed on this branch (plus pilot:export, pilot:cleanup and pilot:import:plan).`);
     return 1;
   }
   if (subcommand === "d1" && !D1_ACTIONS.includes(rest[0])) {

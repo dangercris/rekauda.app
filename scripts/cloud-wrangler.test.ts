@@ -481,9 +481,12 @@ describe("cloud-wrangler: production subcommands", () => {
     expect(refused.status).toBe(1);
     expect(refused.errors.join("")).not.toContain(PROD_DB_ID);
     const missing = setup({ ".pilot-resources.json": "{}" });
-    expect(() => prodRun(missing.root, missing.calls, "prod:status")).toThrow();
+    const gone = prodRun(missing.root, missing.calls, "prod:status");
+    expect([gone.status, missing.calls]).toEqual([1, []]);
+    expect(gone.errors.join("\n")).toMatch(/production config could not be read/);
+    expect(gone.errors.join("\n")).not.toMatch(/ENOENT|at |\//);
     const dup = prodSetup({ "wrangler.production.jsonc": prodConfig().replace(/^\{/, '{ "name": "rekauda-cloud-evil", ') });
-    expect(() => prodRun(dup.root, dup.calls, "prod:status")).toThrow();
+    expect([prodRun(dup.root, dup.calls, "prod:status").status, dup.calls]).toEqual([1, []]);
     expect([shared.calls, missing.calls, dup.calls]).toEqual([[], [], []]);
   });
 

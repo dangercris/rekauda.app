@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const dir = new URL(".", import.meta.url).pathname;
+/** The methods of the remote each production data command may use. Changing this table is a reviewed decision. */
+const EXPECTED_METHODS: Record<string, string[]> = { "prod:import": ["select", "file"] };
 
 function files(base: string): string[] {
   return readdirSync(base, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(base, e.name)) : [join(base, e.name)]));
@@ -48,6 +50,8 @@ describe("the only path to --remote", () => {
   const REMOTE_FUNCTIONS = [
     { fn: "function runSandbox", config: "SANDBOX_CONFIG" },
     { fn: "function runProduction", config: "PRODUCTION_CONFIG" },
+    // The remote of the production data commands (import, validation, undo): see "the production data path" below.
+    { fn: "function productionRemote", config: "PRODUCTION_CONFIG" },
   ];
   const bodyOf = (fn: string) => {
     const from = wrapper.indexOf(fn);
@@ -121,6 +125,71 @@ describe("the pilot export path (read-only)", () => {
   it("contains no write, schema or pragma statement and no other wrangler family", () => {
     expect(code.join("\n")).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/i);
     expect(code.join("\n")).not.toMatch(/"(r2|secret|deploy|delete|kv|versions|migrations|--file|--local)"/);
+  });
+});
+
+describe("the production data path (reads and the import file)", () => {
+  const wrapper = sources.find((s) => s.name === "lib/cloud-wrangler-core.mjs")!.text;
+  const from = wrapper.indexOf("function productionRemote");
+  const remote = wrapper.slice(from, wrapper.indexOf("\n}\n", from));
+  const code = (text: string) => text.split("\n").filter((l) => !l.trimStart().startsWith("//"));
+
+  it("has one spawn, one fixed argv with the production config, and only the --command and --file flags", () => {
+    expect(code(remote).filter((l) => /\bspawn\(/.test(l))).toHaveLength(1);
+    const argv = code(remote).filter((l) => l.includes('"--remote"'));
+    expect(argv).toHaveLength(1);
+    expect(argv[0]).toContain('["d1", "execute", "DB", "--remote", "--json", ...PRODUCTION_CONFIG, flag, value]');
+    expect([...remote.matchAll(/invoke\("(--[a-z]+)"/g)].map((m) => m[1]).sort()).toEqual(["--command", "--file"]);
+    expect(remote).not.toMatch(/\bshell\s*:|stdio: "inherit"|stdio: \[[^\]]*"inherit"/);
+  });
+
+  it("select accepts one SELECT statement only, and file only import.sql", () => {
+    expect(remote).toContain('!sql.startsWith("SELECT ") || !sql.endsWith(";") || sql.slice(0, -1).includes(";")');
+    expect(remote).toContain('basename(path) !== "import.sql"');
+  });
+
+  // Every remote.<method>( call site in the import modules, and nothing else may reach the remote.
+  const ALLOWED = { "lib/import/target.mjs": ["select", "select", "select"], "lib/import/apply.mjs": ["file"] } as Record<string, string[]>;
+  const importSources = sources.filter((s) => s.name.startsWith("lib/import/"));
+  it("only target.mjs reads and only apply.mjs executes, at exactly the allowed call sites", () => {
+    const found = Object.fromEntries(importSources.map((s) => [s.name, [...code(s.text).join("\n").matchAll(/\bremote\.(\w+)\(/g)].map((m) => m[1])]).filter(([, calls]) => (calls as string[]).length > 0));
+    expect(found).toEqual(ALLOWED);
+  });
+
+  it("every select call site sends a SELECT built from constants and validated ids, and target.mjs has no write statement", () => {
+    const target = sources.find((s) => s.name === "lib/import/target.mjs")!.text;
+    for (const line of code(target).filter((l) => l.includes("remote.select("))) expect(line).toMatch(/remote\.select\((`SELECT |sql\))/);
+    expect(code(target).join("\n")).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/i);
+  });
+});
+
+describe("the remote is used only in its plain form, in every module the data commands import", () => {
+  const wrapper = sources.find((s) => s.name === "lib/cloud-wrangler-core.mjs")!.text;
+  const code = (text: string) => text.split("\n").filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join("\n");
+  // Anything but `remote.<method>(` is a way to hide a call from the call-site allowlist.
+  const SNEAKY = [/\bremote\s*\?\./, /\bremote\s*\[/, /=\s*remote\b(?!\.\w+\()/, /\.\.\.remote\b/, /\bremote\.(?!\w+\()/, /(?<!\bremote)\.(select|mutate|file)\(/];
+  const violations = (text: string) => SNEAKY.filter((re) => re.test(code(text)));
+
+  it("pins the data commands and the methods each one gets (least privilege)", () => {
+    const block = wrapper.slice(wrapper.indexOf("const DATA_COMMANDS = {"), wrapper.indexOf("\n};\n", wrapper.indexOf("const DATA_COMMANDS = {")));
+    const entries = [...block.matchAll(/^ {2}"(prod:[a-z-]+)": \{.*methods: (\[[^\]]*\])/gm)].map((m) => [m[1], JSON.parse(m[2]!.replaceAll("'", '"'))]);
+    expect(Object.fromEntries(entries)).toEqual(EXPECTED_METHODS);
+    expect([...block.matchAll(/^ {2}"(prod:[a-z-]+)":/gm)].map((m) => m[1])).toEqual(Object.keys(EXPECTED_METHODS));
+  });
+
+  it("scans every module imported from ./import/ by the wrapper", () => {
+    const imported = [...wrapper.matchAll(/from "\.\/import\/([a-z-]+)\.mjs"/g)].map((m) => `lib/import/${m[1]}.mjs`);
+    expect(imported.length).toBeGreaterThanOrEqual(3);
+    for (const name of imported) {
+      const text = sources.find((s) => s.name === name)?.text;
+      expect(text, name).toBeDefined();
+      expect(violations(text!), name).toEqual([]);
+    }
+  });
+
+  it("catches every way of hiding a call (the fixtures must fail)", () => {
+    for (const bad of ["remote?.mutate(sql);", 'remote["mutate"](sql);', "const { mutate } = remote;", "const r = remote;", "const f = remote.file;", "run(...remote);", "remote.select.call(x, sql);", "other.mutate(sql);"]) expect(violations(bad), bad).not.toEqual([]);
+    for (const good of ["remote.select(sql);", "targetVerdict(remote, plan);", "export function runX({ a }, { remote, log = console }) {", "if (x) remote.file(path);", "const rows = remote.select(sql);"]) expect(violations(good), good).toEqual([]);
   });
 });
 

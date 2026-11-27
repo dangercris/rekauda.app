@@ -2,11 +2,11 @@
 // latest pilot export from the private workdir, runs the preflight, and writes the generated INSERT file (0600) into the
 // same workdir. It prints counts only. Refuses unless two exports of the pilot matched and no mismatch was ever seen.
 import { closeSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { hash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalHash } from "../pilot-export.mjs";
-import { openWorkdir } from "../private-workdir.mjs";
+import { openWorkdir, writeManifest } from "../private-workdir.mjs";
 import { buildImportSql, MAX_BYTES } from "./chunk.mjs";
 import { IMPORT_TABLES } from "./columns.mjs";
 import { assertNodeVersion, loadSnapshot } from "./pilot-snapshot.mjs";
@@ -21,6 +21,32 @@ export function checkManifestGate(manifest) {
   const list = Array.isArray(manifest?.exports) ? manifest.exports : [];
   const ok = list.length >= 2 && manifest.mismatchSeen !== true && list.at(-1).matchesFirst === true;
   return { ok };
+}
+
+const sha256 = (text) => hash("sha256", text, "hex");
+
+/**
+ * What prod:import and prod:validate rely on: the plan recorded in the manifest must still be the one in force. It must be
+ * for this tenant, built from the latest export (which must still pass the freeze gate and match its hash), the SQL file
+ * must hash as recorded, and rebuilding the plan from that export must give the same bytes. Throws a generic error otherwise.
+ * Returns the transformed Cloud rows (for the collision check and the validation) and the file to execute.
+ */
+export function loadPlanState(dir, manifest, tenantId) {
+  const plan = manifest?.plan;
+  const latest = Array.isArray(manifest?.exports) ? manifest.exports.at(-1) : undefined;
+  if (!plan || !latest || plan.file !== PLAN_FILE || plan.tenantId !== tenantId || plan.exportFile !== latest.file || plan.exportHash !== latest.hash || !checkManifestGate(manifest).ok) throw new Error("stale plan");
+  const tables = JSON.parse(readFileSync(join(dir, latest.file), "utf8")).tables;
+  const path = join(dir, PLAN_FILE);
+  if (canonicalHash(tables) !== latest.hash || sha256(readFileSync(path, "utf8")) !== plan.sha256) throw new Error("stale plan");
+  const db = loadSnapshot(tables);
+  try {
+    if (!runPreflight(db, tables).ok) throw new Error("stale plan");
+    const cloud = transform(db, { tenantId });
+    if (sha256(buildImportSql(cloud).join("\n") + "\n") !== plan.sha256) throw new Error("stale plan");
+    return { tables: cloud, path, sha256: plan.sha256 };
+  } finally {
+    db.close();
+  }
 }
 
 /** Writes through a temp file created exclusively (O_EXCL) with mode 0600, then renames it into place. */
@@ -46,6 +72,10 @@ export function runImportPlan(args, { root, log = console, tmp = tmpdir() }) {
     const { dir, manifest } = openWorkdir(args[0], { root, tmp });
     // A plan from an earlier run must never survive a run that refuses or fails.
     rmSync(join(dir, PLAN_FILE), { force: true });
+    if (manifest.plan !== undefined) {
+      delete manifest.plan;
+      writeManifest(dir, manifest);
+    }
     if (!checkManifestGate(manifest).ok) return refuse("needs two matching pilot exports and no mismatch ever seen.");
     const latest = manifest.exports.at(-1);
     const tables = JSON.parse(readFileSync(join(dir, latest.file), "utf8")).tables;
@@ -59,7 +89,9 @@ export function runImportPlan(args, { root, log = console, tmp = tmpdir() }) {
     }
     const statements = buildImportSql(transform(db, { tenantId: args[1] }));
     if (statements.some((s) => Buffer.byteLength(s, "utf8") > MAX_BYTES)) throw new Error("x");
-    writePlan(join(dir, PLAN_FILE), statements.join("\n") + "\n");
+    const text = statements.join("\n") + "\n";
+    writePlan(join(dir, PLAN_FILE), text);
+    writeManifest(dir, { ...manifest, plan: { file: PLAN_FILE, sha256: sha256(text), tenantId: args[1], exportFile: latest.file, exportHash: latest.hash } });
     log.log(`[import-plan] ${statements.length} statements written to ${PLAN_FILE} in the workdir.`);
     return 0;
   } catch {
