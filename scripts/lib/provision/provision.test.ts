@@ -13,6 +13,8 @@ import { mintToken, writeHandover } from "./inbound-token.mjs";
 // @ts-expect-error plain .mjs module without types
 import { prepareProvision, readOwnerState, runProvision } from "./provision.mjs";
 // @ts-expect-error plain .mjs module without types
+import { runUndo } from "../import/undo.mjs";
+// @ts-expect-error plain .mjs module without types
 import { readQr, stageQr } from "./qr.mjs";
 // @ts-expect-error plain .mjs module without types
 import { loadTenantInput } from "./tenant-input.mjs";
@@ -326,6 +328,51 @@ describe("runProvision", () => {
     const ok = run(w, first.remote, {}, true);
     expect(ok.status).toBe(0);
     expect(first.db.sqlite.prepare("SELECT user_id FROM memberships").get()).toEqual({ user_id: "u-old" });
+  });
+
+  it("records the reused owner in the manifest atomically with the tenant state, and a new owner leaves no such field", () => {
+    const reused = world();
+    const first = fakeRemote();
+    first.db.sqlite.exec("INSERT INTO users (id, email, kind, created_at) VALUES ('u-old', 'owner@example.test', 'person', 'x')");
+    expect(run(reused, first.remote, {}, true).status).toBe(0);
+    expect(readManifest(reused.dir).tenant).toEqual({ id: TENANT_ID, slug: "curso-demo", state: "provisioned", reusedOwnerId: "u-old" });
+    const failed = world();
+    const broken = fakeRemote({ failInsertAt: 1 });
+    broken.db.sqlite.exec("INSERT INTO users (id, email, kind, created_at) VALUES ('u-old', 'owner@example.test', 'person', 'x')");
+    expect(run(failed, broken.remote, {}, true).status).toBe(1);
+    expect(readManifest(failed.dir).tenant).toEqual({ id: TENANT_ID, slug: "curso-demo", state: "provisioning", reusedOwnerId: "u-old" });
+    const fresh = world();
+    expect(run(fresh, fakeRemote().remote).status).toBe(0);
+    expect(readManifest(fresh.dir).tenant).toEqual({ id: TENANT_ID, slug: "curso-demo", state: "provisioned" });
+  });
+
+  describe("undo-tenant after provisioning", () => {
+    const undoOf = (w: ReturnType<typeof world>, fake: ReturnType<typeof fakeRemote>) => {
+      const remote = { select: fake.remote.select, mutate: (q: string) => fake.db.sqlite.exec(q) };
+      const log = { error: () => {}, warn: () => {}, log: () => {} };
+      return runUndo({ dir: w.dir, manifest: readManifest(w.dir), tenantId: TENANT_ID, slug: "curso-demo", tenantLevel: true }, { remote, log }) as number;
+    };
+    const users = (fake: ReturnType<typeof fakeRemote>) => (fake.db.sqlite.prepare("SELECT id FROM users ORDER BY id").all() as { id: string }[]).map((r) => r.id);
+
+    it("never deletes an existing person that had no membership before and was reused as owner", () => {
+      const w = world();
+      const fake = fakeRemote();
+      fake.db.sqlite.exec("INSERT INTO users (id, email, kind, created_at) VALUES ('u-old', 'owner@example.test', 'person', 'x')");
+      expect(run(w, fake.remote, {}, true).status).toBe(0);
+      expect(undoOf(w, fake)).toBe(0);
+      expect(users(fake)).toEqual(["u-old"]);
+      expect(fake.db.sqlite.prepare("SELECT COUNT(*) AS n FROM tenants").get()).toEqual({ n: 0 });
+      expect(readManifest(w.dir).tenant).toBeUndefined();
+    });
+
+    it("deletes an owner that provisioning created", () => {
+      const w = world();
+      const fake = fakeRemote();
+      expect(run(w, fake.remote).status).toBe(0);
+      expect(users(fake)).toEqual([OWNER_ID]);
+      expect(undoOf(w, fake)).toBe(0);
+      expect(users(fake)).toEqual([]);
+    });
   });
 
   it("refuses the reuse phrase when there is no existing account", () => {

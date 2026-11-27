@@ -4,7 +4,8 @@
 // (ids compared locally from SELECT-only id reads; students by count, their ids are regenerated). So it removes an untouched
 // or partial import and refuses once parents have created new data. Without the workdir the runbook covers manual removal.
 // The tenant level also removes sessions, magic links, memberships, every user whose only membership was this tenant (any
-// role) and the domains and the tenant row, last. A user cannot be deleted while a membership references it, so the user
+// role, except an existing account provisioning reused as owner: its id is in manifest.tenant.reusedOwnerId and is never deleted)
+// and the domains and the tenant row, last. A user cannot be deleted while a membership references it, so the user
 // ids are written to the workdir BEFORE the first DELETE: a rerun after a crash at any step finishes the job.
 // Idempotent. Counts only in the output. No dependencies.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -41,6 +42,14 @@ function recordedUsers(dir) {
   }
 }
 
+/** The existing account provisioning reused as owner, which undo must never delete. `undefined` when the owner was created by provisioning; throws when the manifest says an owner was reused but the id is unreadable. */
+function reusedOwner(manifest, tenantId) {
+  const tenant = manifest?.tenant;
+  if (!tenant || tenant.id !== tenantId || !Object.hasOwn(tenant, "reusedOwnerId")) return undefined;
+  if (typeof tenant.reusedOwnerId !== "string" || !PLAIN_ID.test(tenant.reusedOwnerId)) throw new Error("malformed reusedOwnerId");
+  return tenant.reusedOwnerId;
+}
+
 export function runUndo({ dir, manifest, tenantId, slug, tenantLevel }, { remote, log = console }) {
   const refuse = (why) => (log.error(`[undo] REFUSED: ${why}`), 1);
   if (!UUID.test(tenantId) || !SLUG.test(slug)) return refuse("bad tenant id or slug.");
@@ -53,11 +62,18 @@ export function runUndo({ dir, manifest, tenantId, slug, tenantLevel }, { remote
     if (!tenantLevel || manifest?.tenant?.id !== tenantId) return refuse(REFUSE_WORKDIR);
     planless = true;
   }
+  let kept;
+  try {
+    kept = tenantLevel ? reusedOwner(manifest, tenantId) : undefined;
+  } catch {
+    return refuse("the manifest says an owner was reused but its id cannot be read. Nothing was deleted; check the workdir manifest.");
+  }
+  const spare = (ids) => ids.filter((id) => id !== kept);
   let statements = [];
   let userIds = [];
   try {
     const tenant = readTenant(remote, tenantId);
-    if (tenant === null && tenantLevel) userIds = recordedUsers(dir);
+    if (tenant === null && tenantLevel) userIds = spare(recordedUsers(dir));
     else {
       if (tenant?.source !== "pilot_import" || tenant.slug !== slug) return refuse("the target tenant is not the expected pilot_import tenant.");
       // Without a plan the proof that the tenant is not live is that it has no row at all in the four data tables.
@@ -69,7 +85,7 @@ export function runUndo({ dir, manifest, tenantId, slug, tenantLevel }, { remote
       if (!planless && readRowCounts(remote, tenantId).students > plan.students) return refuse("the tenant has data that is not part of the import (it may be live). Nothing was deleted.");
       if (tenantLevel) {
         const members = remote.select(`SELECT user_id FROM memberships WHERE tenant_id = '${tenantId}';`).map((row) => row.user_id);
-        userIds = [...new Set([...recordedUsers(dir), ...members])];
+        userIds = spare([...new Set([...recordedUsers(dir), ...members])]);
         writeFileSync(join(dir, USERS_FILE), JSON.stringify(userIds), { mode: 0o600 });
       }
       statements = undoStatements(tenantId, { tenant: tenantLevel, userIds });
