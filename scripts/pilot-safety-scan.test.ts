@@ -14,6 +14,8 @@ const sources = files(dir)
   .filter((f) => !f.endsWith(".test.ts") && !f.endsWith("fake-checkout.ts"))
   .map((f) => ({ name: f.slice(dir.length), text: readFileSync(f, "utf8") }));
 
+const provisionSources = sources.filter((s) => s.name.startsWith("lib/provision/"));
+
 // The only files allowed to mention the flag: the guard and the wrapper, which exist to REJECT it.
 const WRAPPER_FILES = ["cloud-wrangler.mjs", "lib/cloud-wrangler-core.mjs"];
 const EXPORT_FILE = "lib/pilot-export.mjs";
@@ -154,16 +156,17 @@ describe("the production data path (reads and the import file)", () => {
   });
 
 
-  // Every remote.<method>( call site in the import modules, and nothing else may reach the remote.
+  // Every remote.<method>( call site in the data modules (import and provision), and nothing else may reach the remote.
   const ALLOWED = {
     "lib/import/target.mjs": ["select", "select", "select"],
     "lib/import/apply.mjs": ["file"],
     "lib/import/validate.mjs": ["select"],
     "lib/import/undo.mjs": ["select", "select", "mutate", "select"],
+    "lib/provision/provision.mjs": ["select", "select", "put", "insert", "select"],
   } as Record<string, string[]>;
   const importSources = sources.filter((s) => s.name.startsWith("lib/import/"));
   it("only these modules reach the remote, at exactly the allowed call sites", () => {
-    const found = Object.fromEntries(importSources.map((s) => [s.name, [...code(s.text).join("\n").matchAll(/\bremote\.(\w+)\(/g)].map((m) => m[1])]).filter(([, calls]) => (calls as string[]).length > 0));
+    const found = Object.fromEntries([...importSources, ...provisionSources].map((s) => [s.name, [...code(s.text).join("\n").matchAll(/\bremote\.(\w+)\(/g)].map((m) => m[1])]).filter(([, calls]) => (calls as string[]).length > 0));
     expect(found).toEqual(ALLOWED);
   });
 
@@ -180,6 +183,14 @@ describe("the production data path (reads and the import file)", () => {
 
   // Every DELETE line must carry the pilot_import guard (a shared GUARD helper or the literal), and a user delete must also
   // carry the other-membership clause. The checker itself is proven by fixtures with a guard removed.
+  it("the provision modules send only SELECTs built from constants and literals, and write no SQL of their own (the INSERTs come from provision-sql.ts)", () => {
+    for (const s of provisionSources) {
+      for (const line of code(s.text).filter((l) => l.includes("remote.select("))) expect(line, s.name).toMatch(/remote\.select\(`SELECT /);
+      expect(code(s.text).join("\n"), s.name).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/);
+    }
+    expect(provisionSources.map((s) => s.name)).toEqual(expect.arrayContaining(["lib/provision/provision.mjs", "lib/provision/qr.mjs", "lib/provision/tenant-input.mjs", "lib/provision/inbound-token.mjs"]));
+  });
+
   const deleteProblems = (line: string): string[] => {
     const problems: string[] = [];
     if (!line.includes("source = 'pilot_import'") && !line.includes("${GUARD(")) problems.push("no pilot_import guard");
@@ -189,7 +200,7 @@ describe("the production data path (reads and the import file)", () => {
   };
 
   it("the only DELETE statements live in undo.mjs, and every one carries its guards", () => {
-    for (const s of importSources.filter((i) => !i.name.endsWith("undo.mjs"))) expect(code(s.text).join("\n"), s.name).not.toMatch(/\bDELETE\b/);
+    for (const s of [...importSources, ...provisionSources].filter((i) => !i.name.endsWith("undo.mjs"))) expect(code(s.text).join("\n"), s.name).not.toMatch(/\bDELETE\b/);
     const lines = code(sources.find((s) => s.name === "lib/import/undo.mjs")!.text).filter((l) => /DELETE FROM/.test(l));
     expect(lines.length).toBe(3);
     for (const line of lines) expect(deleteProblems(line), line).toEqual([]);
@@ -210,7 +221,7 @@ describe("the remote is used only in its plain form, in every module the data co
   const wrapper = sources.find((s) => s.name === "lib/cloud-wrangler-core.mjs")!.text;
   const code = (text: string) => text.split("\n").filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join("\n");
   // Anything but `remote.<method>(` is a way to hide a call from the call-site allowlist.
-  const SNEAKY = [/\bremote\s*\?\./, /\bremote\s*\[/, /=\s*remote\b(?!\.\w+\()/, /\.\.\.remote\b/, /\bremote\.(?!\w+\()/, /(?<!\bremote)\.(select|mutate|file)\(/];
+  const SNEAKY = [/\bremote\s*\?\./, /\bremote\s*\[/, /=\s*remote\b(?!\.\w+\()/, /\.\.\.remote\b/, /\bremote\.(?!\w+\()/, /(?<!\bremote)\.(select|mutate|file|insert|put)\(/];
   const violations = (text: string) => SNEAKY.filter((re) => re.test(code(text)));
 
   it("pins the data commands and the methods each one gets (least privilege)", () => {
@@ -220,10 +231,10 @@ describe("the remote is used only in its plain form, in every module the data co
     expect([...block.matchAll(/^ {2}"(prod:[a-z-]+)":/gm)].map((m) => m[1])).toEqual(Object.keys(EXPECTED_METHODS));
   });
 
-  it("scans every module imported from ./import/ by the wrapper", () => {
-    const imported = [...wrapper.matchAll(/from "\.\/import\/([a-z-]+)\.mjs"/g)].map((m) => `lib/import/${m[1]}.mjs`);
+  it("scans every module imported from ./import/ or ./provision/ by the wrapper, and every module in ./provision/", () => {
+    const imported = [...wrapper.matchAll(/from "\.\/(import|provision)\/([a-z-]+)\.mjs"/g)].map((m) => `lib/${m[1]}/${m[2]}.mjs`);
     expect(imported.length).toBeGreaterThanOrEqual(3);
-    for (const name of imported) {
+    for (const name of [...new Set([...imported, ...provisionSources.map((s) => s.name)])]) {
       const text = sources.find((s) => s.name === name)?.text;
       expect(text, name).toBeDefined();
       expect(violations(text!), name).toEqual([]);
@@ -231,8 +242,35 @@ describe("the remote is used only in its plain form, in every module the data co
   });
 
   it("catches every way of hiding a call (the fixtures must fail)", () => {
-    for (const bad of ["remote?.mutate(sql);", 'remote["mutate"](sql);', "const { mutate } = remote;", "const r = remote;", "const f = remote.file;", "run(...remote);", "remote.select.call(x, sql);", "other.mutate(sql);"]) expect(violations(bad), bad).not.toEqual([]);
+    for (const bad of ["remote?.mutate(sql);", 'remote["mutate"](sql);', "const { mutate } = remote;", "const r = remote;", "const f = remote.file;", "run(...remote);", "remote.select.call(x, sql);", "other.mutate(sql);", "r.insert(x);", "other.put(y);", "const { insert } = remote;"]) expect(violations(bad), bad).not.toEqual([]);
     for (const good of ["remote.select(sql);", "targetVerdict(remote, plan);", "export function runX({ a }, { remote, log = console }) {", "if (x) remote.file(path);", "const rows = remote.select(sql);"]) expect(violations(good), good).toEqual([]);
+  });
+});
+
+// Node loads these TS files directly (type stripping, Node >= 22.18): no runtime import, no enum, no namespace, no parameter
+// property. Node would need explicit extensions and cannot transform those. The checker is proven by fixtures.
+const tsProblems = (text: string): string[] => {
+  const stripped = text.split("\n").filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join("\n");
+  const problems: string[] = [];
+  if (/^\s*(?:import|export)\s+(?!type\b)(?:[^"';]*?\sfrom\s+)?["'][^"']+["']/m.test(stripped)) problems.push("runtime import");
+  if (/\bimport\s*\(/.test(stripped)) problems.push("dynamic import");
+  if (/^\s*(?:export\s+)?(?:declare\s+)?(?:const\s+)?enum\s/m.test(stripped)) problems.push("enum");
+  if (/^\s*(?:export\s+)?(?:declare\s+)?namespace\s+\w/m.test(stripped)) problems.push("namespace");
+  if (/constructor\s*\(\s*(?:[^)]*?\b)?(?:public|private|protected|readonly)\s+\w/.test(stripped)) problems.push("parameter property");
+  return problems;
+};
+
+describe("TS files that Node loads from the scripts", () => {
+  const loaded = [...new Set(sources.flatMap((s) => [...s.text.matchAll(/from "((?:\.\.?\/)+[^"]*\.ts)"/g)].map((m) => new URL(m[1]!, new URL(s.name, "file://" + dir)).pathname)))];
+  it("finds the TS files the scripts import", () => {
+    for (const name of ["storage/keys.ts", "shared/instance-validation.ts", "tenancy/host.ts", "tenancy/provision-sql.ts"]) expect(loaded.some((f) => f.endsWith("/src/" + (name.startsWith("shared") ? name : "worker/" + name))), name).toBe(true);
+  });
+  it.each(loaded.map((f) => [f.slice(f.indexOf("/src/") + 1), f]))("%s needs nothing but type stripping", (_name, file) => {
+    expect(tsProblems(readFileSync(file as string, "utf8"))).toEqual([]);
+  });
+  it("the checker flags every construct Node cannot strip (the fixtures must fail)", () => {
+    for (const bad of ['import { a } from "./x";', 'import x from "./x";', 'import "./side";', 'import * as m from "./m";', 'export * from "./m";', 'export { a } from "./m";', 'import {\n  a,\n} from "./x";', 'import { type A } from "./x";', "const m = await import(\"./x\");", "export enum A { B }", "const enum A { B }", "namespace N { }", "class C { constructor(private x: number) {} }"]) expect(tsProblems(bad), bad).not.toEqual([]);
+    for (const good of ['import type { A } from "./x";', 'export type { A } from "./x";', "export const a = 1;", 'export const PREFIX = "x";', "export function f(): string { return 'import'; }", "// import { a } from './x';", "class C { constructor(x: number) {} }"]) expect(tsProblems(good), good).toEqual([]);
   });
 });
 
