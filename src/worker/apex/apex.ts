@@ -4,8 +4,10 @@ import type { LegacyRedirects } from "./legacy-redirects";
 /**
  * The apex host (ROOT_DOMAIN and www) in multi mode. It is not a tenant, so it never touches D1 or the app shell:
  * - `/` is a static landing with its own restrictive CSP (a separate document from the app CSP).
- * - Exactly the configured legacy paths answer 302 + no-store, query kept. Matching is exact on the raw pathname:
- *   no trailing slash, case folding, percent-decoding or dot-segment handling, so nothing but the configured string matches.
+ * - The configured legacy paths answer 302 + no-store, query kept. Matching is exact on the pathname, with ONE optional
+ *   trailing slash tolerated (never at "/", never twice): no case folding and no percent-decoding of our own. The WHATWG URL
+ *   parser has already resolved dot-segments and backslashes before we see the pathname. That is harmless: the target is a
+ *   fixed string from the validated map, so no request path can steer where the redirect goes.
  * - Everything else, and any method other than GET and HEAD, is the generic 404.
  */
 const LANDING_CSP = "default-src 'none'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
@@ -39,7 +41,8 @@ export function serveApex(request: Request, url: URL, redirects: LegacyRedirects
       },
     });
   }
-  const target = Object.hasOwn(redirects, pathname) ? redirects[pathname] : undefined;
+  const key = pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  const target = Object.hasOwn(redirects, key) ? redirects[key] : undefined;
   if (target) return new Response(null, { status: 302, headers: { location: target + url.search, "cache-control": "no-store" } });
   return tenantNotFound();
 }

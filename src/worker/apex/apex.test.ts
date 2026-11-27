@@ -14,6 +14,15 @@ describe("serveApex legacy redirect", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("accepts exactly one trailing slash and redirects to the same canonical target", () => {
+    const res = call("/r/curso-demo/?x=1");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`https://curso-demo.${ROOT}/r/curso-demo?x=1`);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(call("/r/curso-demo/", "HEAD").status).toBe(302);
+    expect(call("/r/curso-demo/", "POST").status).toBe(404);
+  });
+
   it("without a query the Location has none", () => expect(call("/r/curso-demo").headers.get("location")).toBe(MAP["/r/curso-demo"]));
 
   it.each(["POST", "PUT", "PATCH", "DELETE", "OPTIONS"])("%s on the legacy path is a plain 404, never a redirect", (method) => {
@@ -24,7 +33,9 @@ describe("serveApex legacy redirect", () => {
 
   // Exact match only: no normalisation of trailing slash, case, encoding or dot segments.
   it.each([
-    ["trailing slash", "/r/curso-demo/"],
+    ["two trailing slashes", "/r/curso-demo//"],
+    ["trailing slash then segment", "/r/curso-demo/x"],
+    ["bare double slash", "//"],
     ["extra segment", "/r/curso-demo/extra"],
     ["uppercase", "/R/curso-demo"],
     ["uppercase slug", "/r/Curso-Demo"],
@@ -39,6 +50,11 @@ describe("serveApex legacy redirect", () => {
     const res = call(path);
     expect(res.status).toBe(404);
     expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("the redirect target is never the same URL the request came to (no loop)", () => {
+    const res = call("/r/curso-demo/");
+    expect(new URL(res.headers.get("location")!).host).not.toBe(ROOT);
   });
 
   it("an empty map answers 404 on the legacy path", () => expect(call("/r/curso-demo", "GET", {}).status).toBe(404));

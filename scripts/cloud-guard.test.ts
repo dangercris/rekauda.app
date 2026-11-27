@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { fakeCheckout } from "./lib/fake-checkout";
@@ -24,6 +24,17 @@ const guard = (root: string, ...args: string[]) => spawnSync(process.execPath, [
 const output = (r: { stdout: string; stderr: string }) => r.stdout + r.stderr;
 
 describe("cloud-guard CLI", () => {
+  it("says clearly that Node >= 22.18 is needed when type stripping is unavailable (no confusing import error)", () => {
+    const result = spawnSync(process.execPath, ["--no-experimental-strip-types", join(checkout(), "scripts/cloud-guard.mjs"), "--local"], { encoding: "utf8" });
+    expect(result.status).toBe(1);
+    expect(output(result)).toContain("Node >= 22.18");
+    expect(output(result)).not.toMatch(/ERR_|SyntaxError|Cannot find module/);
+  });
+
+  it("declares the Node engine in package.json", () => {
+    expect(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).engines).toEqual({ node: ">=22.18" });
+  });
+
   it("exits 0 with a warning, and no ids, when no real pilot data is known", () => {
     const result = guard(checkout(), "--local");
     expect(result.status).toBe(0);

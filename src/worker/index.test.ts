@@ -291,7 +291,7 @@ describe("apex mode (multi)", () => {
     const mapped = withMap(env, LEGACY);
     const post = await worker.fetch(new Request("https://localhost/r/curso-demo", { method: "POST", headers: { "cf-connecting-ip": "203.0.113.1" } }), mapped, ec);
     expect(post.status).toBe(404);
-    for (const path of ["/r/curso-demo/", "/r/otro", "/admin", "/api/collections", "/assets/app.js"]) expect((await get(mapped, "localhost", path)).status, path).toBe(404);
+    for (const path of ["/r/curso-demo//", "/r/otro", "/admin", "/api/collections", "/assets/app.js"]) expect((await get(mapped, "localhost", path)).status, path).toBe(404);
   });
 
   it("a malformed or open-redirect map fails closed to 404 and the log never echoes it", async () => {

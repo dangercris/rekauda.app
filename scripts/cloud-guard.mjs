@@ -8,7 +8,14 @@
 // Pilot data comes from the local wrangler.jsonc and .pilot-resources.json (see wrangler.cloud.example.jsonc).
 // Never prints ids, names or secrets. No dependencies.
 import { fileURLToPath } from "node:url";
-import { loadAndCheck, loadAndCheckProduction, loadAndCheckSandbox, report } from "./lib/cloud-guard-io.mjs";
+
+// The guard loads a zero-import .ts parser through Node type stripping (Node >= 22.18). Say so plainly BEFORE importing it,
+// instead of failing with a confusing module error. The import is dynamic for exactly this reason.
+if (!process.features.typescript) {
+  console.error("[cloud-guard] REFUSED: Node >= 22.18 with type stripping is required (see engines in package.json). Upgrade Node and retry.");
+  process.exit(1);
+}
+const { loadAndCheck, loadAndCheckProduction, loadAndCheckSandbox, report } = await import("./lib/cloud-guard-io.mjs");
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 

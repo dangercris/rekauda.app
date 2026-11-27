@@ -367,7 +367,8 @@ export function checkProductionConfig({ target, targetFile, pilot, pilotExample,
   if (vars.TENANCY !== "multi") refuse("vars.TENANCY", 'must be "multi"');
   if (!DNS_NAME.test(root) || root.endsWith(".workers.dev")) refuse("vars.ROOT_DOMAIN", "must be a DNS name and not workers.dev");
   if (vars.INBOUND_DOMAIN !== `in.${root}`) refuse("vars.INBOUND_DOMAIN", 'must be "in." + ROOT_DOMAIN');
-  if ("LEGACY_REDIRECTS" in vars && !legacyRedirectsValid(vars.LEGACY_REDIRECTS, root)) refuse("vars.LEGACY_REDIRECTS", "invalid legacy redirect map");
+  // Only judge the map once the root itself is valid (an invalid root is already refused above, naming ROOT_DOMAIN).
+  if ("LEGACY_REDIRECTS" in vars && DNS_NAME.test(normRoot(root)) && !legacyRedirectsValid(vars.LEGACY_REDIRECTS, normRoot(root))) refuse("vars.LEGACY_REDIRECTS", "invalid legacy redirect map");
   checkProductionRoutes(target, root, apex, refuse);
 
   for (const [key, allowed] of Object.entries({ ...SANDBOX_LIST_KEYS, send_email: ["name"] })) {

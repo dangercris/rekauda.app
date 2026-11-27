@@ -6,7 +6,16 @@
 
 const MAX_ENTRIES = 20;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const MAX_SLUG_LENGTH = 48;
+// Same rules as isValidSlug (src/worker/tenancy/host.ts): 3-40 characters, no "--", not reserved. Inlined because this file has
+// ZERO imports; a parity test compares the two so they cannot drift. This also refuses /r/www (a self-redirect loop) and /r/api.
+const MIN_SLUG_LENGTH = 3;
+const MAX_SLUG_LENGTH = 40;
+export const LEGACY_RESERVED_LABELS: readonly string[] = [
+  "www", "api", "admin", "app", "mail", "in", "static", "assets", "cdn", "status",
+  "docs", "help", "login", "auth", "billing", "cloud", "dev", "staging", "test", "demo",
+  "support", "security", "abuse", "postmaster", "webmaster", "smtp", "imap", "pop", "ns1", "ns2",
+  "blog", "account", "console", "portal", "signup", "rekauda", "autodiscover",
+];
 const ROOT = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/;
 const KEY = /^\/r\/([^/]+)$/;
 
@@ -25,7 +34,7 @@ export function legacyRedirectsValid(raw: unknown, root: unknown): boolean {
   if (entries.length > MAX_ENTRIES) return false;
   return entries.every(([key, value]) => {
     const slug = KEY.exec(key)?.[1];
-    return slug !== undefined && slug.length <= MAX_SLUG_LENGTH && SLUG.test(slug) && value === `https://${slug}.${root}/r/${slug}`;
+    return slug !== undefined && slug.length >= MIN_SLUG_LENGTH && slug.length <= MAX_SLUG_LENGTH && SLUG.test(slug) && !slug.includes("--") && !LEGACY_RESERVED_LABELS.includes(slug) && value === `https://${slug}.${root}/r/${slug}`;
   });
 }
 

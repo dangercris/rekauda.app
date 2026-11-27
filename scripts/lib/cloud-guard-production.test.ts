@@ -232,3 +232,16 @@ describe("LEGACY_REDIRECTS parity between the guard and the Worker parser", () =
     else expect(parseLegacyRedirects(map, ROOT)).toEqual(map);
   });
 });
+
+describe("LEGACY_REDIRECTS and the root", () => {
+  it("normalises the root like the other checks (case, trailing dot) before the parser", () => {
+    const result = run(withVars({ ROOT_DOMAIN: `${ROOT.toUpperCase()}.`, INBOUND_DOMAIN: `in.${ROOT.toUpperCase()}.`, LEGACY_REDIRECTS: { "/r/curso-demo": `https://curso-demo.${ROOT}/r/curso-demo` } }));
+    expect(fields(result)).not.toContain("vars.LEGACY_REDIRECTS");
+  });
+
+  it("when the root itself is invalid the refusal names ROOT_DOMAIN, not the map", () => {
+    const result = run(withVars({ ROOT_DOMAIN: "not a domain", INBOUND_DOMAIN: "in.not a domain", LEGACY_REDIRECTS: { "/r/curso-demo": "https://curso-demo.not a domain/r/curso-demo" } }));
+    expect(fields(result)).toContain("vars.ROOT_DOMAIN");
+    expect(fields(result)).not.toContain("vars.LEGACY_REDIRECTS");
+  });
+});

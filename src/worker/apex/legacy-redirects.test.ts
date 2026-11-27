@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { legacyRedirectsValid, parseLegacyRedirects } from "./legacy-redirects";
+import { RESERVED_SUBDOMAINS, isValidSlug } from "../tenancy/host";
+import { LEGACY_RESERVED_LABELS, legacyRedirectsValid, parseLegacyRedirects } from "./legacy-redirects";
 
 // Invented values only.
 const ROOT = "colegio-demo.example.test";
@@ -49,7 +50,10 @@ describe("parseLegacyRedirects", () => {
     ["uppercase key", { "/r/Curso-Demo": `https://curso-demo.${ROOT}/r/curso-demo` }],
     ["key outside /r/", { "/admin": `https://admin.${ROOT}/r/admin` }],
     ["key with no slug", { "/r/": `https://.${ROOT}/r/` }],
-    ["slug over 48 characters", { [`/r/${"a".repeat(49)}`]: `https://${"a".repeat(49)}.${ROOT}/r/${"a".repeat(49)}` }],
+    ["slug over 40 characters", { [`/r/${"a".repeat(41)}`]: `https://${"a".repeat(41)}.${ROOT}/r/${"a".repeat(41)}` }],
+    ["slug under 3 characters", { "/r/ab": `https://ab.${ROOT}/r/ab` }],
+    ["reserved www (self-redirect loop)", { "/r/www": `https://www.${ROOT}/r/www` }],
+    ["reserved api", { "/r/api": `https://api.${ROOT}/r/api` }],
     ["slug with a double hyphen", { "/r/cur--so": `https://cur--so.${ROOT}/r/cur--so` }],
     ["slug starting with a hyphen", { "/r/-curso": `https://-curso.${ROOT}/r/-curso` }],
   ];
@@ -70,5 +74,14 @@ describe("parseLegacyRedirects", () => {
   it("does not trust prototype keys", () => {
     const parsed = parseLegacyRedirects(JSON.parse('{"__proto__":"x"}'), ROOT);
     expect(parsed).toEqual({});
+  });
+});
+
+describe("tenant slug rules parity with isValidSlug (src/worker/tenancy/host.ts)", () => {
+  const entry = (slug: string) => ({ [`/r/${slug}`]: `https://${slug}.${ROOT}/r/${slug}` });
+  it("inlines exactly the reserved labels of the host parser", () => expect(new Set(LEGACY_RESERVED_LABELS)).toEqual(new Set(RESERVED_SUBDOMAINS)));
+  it.each([...RESERVED_SUBDOMAINS].map((label) => [label]))("refuses the reserved label %s", (label) => expect(legacyRedirectsValid(entry(label), ROOT)).toBe(false));
+  it.each(["ab", "abc", "a".repeat(40), "a".repeat(41), "a--b", "a-b-c", "-abc", "abc-", "curso-demo", "demo", "rekauda", "ns1", "x1y", "a_b"])("slug %s: the parser accepts exactly when isValidSlug does", (slug) => {
+    expect(legacyRedirectsValid(entry(slug), ROOT)).toBe(isValidSlug(slug));
   });
 });
