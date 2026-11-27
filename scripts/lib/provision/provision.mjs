@@ -84,13 +84,20 @@ function provision({ dir, tenantId, ownerId, slug, prepared, reuseOwner }, { rem
     const configJson = JSON.stringify(input.config);
     const row = { id: tenantId, slug, hostname, configJson, ownerEmail: input.ownerEmail, ownerId, nowIso: now(), source: "pilot_import", qrKey: tenantPrefix(tenantId) + assetKey(`deuna-qr.${qr.ext}`), inboundTokenHash: hash };
     for (const statement of provisionTenantStatements(row)) remote.insert(render(statement));
-    const back = remote.select(`SELECT slug, source, r2_prefix, qr_key, inbound_token_hash, config_json, (SELECT COUNT(*) FROM tenant_domains WHERE tenant_id = ${literal(tenantId)} AND hostname = ${literal(hostname)}) AS domains, (SELECT COUNT(*) FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = ${literal(tenantId)} AND m.role = 'owner' AND u.email = ${literal(input.ownerEmail)} AND u.kind = 'person') AS owners FROM tenants WHERE id = ${literal(tenantId)};`);
+    const back = remote.select(`SELECT slug, source, r2_prefix, qr_key, inbound_token_hash, config_json, (SELECT COUNT(*) FROM tenant_domains WHERE tenant_id = ${literal(tenantId)} AND hostname = ${literal(hostname)}) AS domains, (SELECT COUNT(*) FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = ${literal(tenantId)} AND m.role = 'owner' AND u.email = ${literal(input.ownerEmail)} AND u.kind = 'person') AS owners, (SELECT u.id FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = ${literal(tenantId)} AND m.role = 'owner' AND u.email = ${literal(input.ownerEmail)} AND u.kind = 'person') AS owner_id FROM tenants WHERE id = ${literal(tenantId)};`);
     const ok = back.length === 1 && back[0].slug === slug && back[0].source === "pilot_import" && back[0].r2_prefix === tenantPrefix(tenantId) && back[0].qr_key === row.qrKey && back[0].inbound_token_hash === hash && back[0].config_json === configJson && back[0].domains === 1 && back[0].owners === 1;
-    if (!ok) throw new Error("read-back mismatch");
+    // The owner INSERT is ON CONFLICT DO NOTHING: an account registered with this email after the read is silently the owner. Record it so undo keeps it.
+    const expectedOwner = reusedOwnerId ?? ownerId;
+    if (ok && back[0].owner_id !== expectedOwner && !reuseOwner && typeof back[0].owner_id === "string" && PLAIN_ID.test(back[0].owner_id)) {
+      writeManifest(dir, { ...readManifest(dir), tenant: { id: tenantId, slug, state: "provisioning", reusedOwnerId: back[0].owner_id } });
+      log.error(`[provision] REFUSED: an account was registered with the owner email while provisioning, so it became the owner. It is recorded as tenant.reusedOwnerId and undo keeps it. tenant=${tenantId}. Run prod:undo-tenant for it, then start again.`);
+      return 1;
+    }
+    if (!ok || back[0].owner_id !== expectedOwner) throw new Error("read-back mismatch");
     // The address is handed over only now: a failed run never leaves a dead inbound address behind.
     const handover = writeHandover(dir, address);
     writeManifest(dir, { ...readManifest(dir), tenant: { id: tenantId, slug, state: "provisioned", ...(reusedOwnerId === undefined ? {} : { reusedOwnerId }) } });
-    log.log(`[provision] tenant=${tenantId} slug=${slug} provisioned. The inbound address is in ${handover} (mode 0600). Next: pilot:import:plan <workdir>.`);
+    log.log(`[provision] tenant=${tenantId} slug=${slug} provisioned${reusedOwnerId === undefined ? "" : ` reusedOwnerId=${reusedOwnerId}`}. The inbound address is in ${handover} (mode 0600). Next: pilot:import:plan <workdir>.`);
     return 0;
   } catch {
     log.error(`[provision] FAILED: the tenant may be partly provisioned (no details are shown on purpose). tenant=${tenantId}. If it has no data, run prod:undo-tenant for it, then follow the runbook before trying again.`);

@@ -365,6 +365,26 @@ describe("runProvision", () => {
       expect(readManifest(w.dir).tenant).toBeUndefined();
     });
 
+    it("an account registered with the owner email after the read is refused at read-back, recorded for undo, and kept by undo", () => {
+      const w = world();
+      const fake = fakeRemote();
+      const racing = {
+        ...fake.remote,
+        insert: (sql: string) => {
+          if (sql.startsWith("INSERT INTO tenants")) fake.db.sqlite.exec("INSERT INTO users (id, email, kind, created_at) VALUES ('u-race', 'owner@example.test', 'person', 'x')");
+          fake.remote.insert(sql);
+        },
+      };
+      const { status, out } = run(w, racing);
+      expect(status).toBe(1);
+      expect(out).toMatch(/was registered with the owner email/i);
+      expect(out).not.toMatch(/owner@example/);
+      expect(readManifest(w.dir).tenant).toEqual({ id: TENANT_ID, slug: "curso-demo", state: "provisioning", reusedOwnerId: "u-race" });
+      expect(existsSync(join(w.dir, "handover.txt"))).toBe(false);
+      expect(undoOf(w, fake)).toBe(0);
+      expect(users(fake)).toEqual(["u-race"]);
+    });
+
     it("deletes an owner that provisioning created", () => {
       const w = world();
       const fake = fakeRemote();
@@ -373,6 +393,16 @@ describe("runProvision", () => {
       expect(undoOf(w, fake)).toBe(0);
       expect(users(fake)).toEqual([]);
     });
+  });
+
+  it("prints the reused owner id (never the email) in the success line, and nothing extra for a new owner", () => {
+    const reused = world();
+    const first = fakeRemote();
+    first.db.sqlite.exec("INSERT INTO users (id, email, kind, created_at) VALUES ('u-old', 'owner@example.test', 'person', 'x')");
+    const a = run(reused, first.remote, {}, true);
+    expect(a.out).toMatch(/reusedOwnerId=u-old/);
+    expect(a.out).not.toMatch(/owner@example/);
+    expect(run(world(), fakeRemote().remote).out).not.toMatch(/reusedOwnerId/);
   });
 
   it("refuses the reuse phrase when there is no existing account", () => {
