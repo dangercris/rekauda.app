@@ -1,3 +1,4 @@
+import { provisionTenantStatements } from "../tenancy/provision-sql";
 import type { Tenant, TenantSource } from "../tenancy/tenant";
 
 /** Fixed identity of the single tenant of a self-hosted instance, so provisioning is idempotent. */
@@ -164,27 +165,8 @@ export class PlatformDb {
       .bind(row.slug, row.hostname)
       .first();
     if (taken) return null;
-    const prefix = `t/${row.id}/`;
-    await this.db.batch([
-      this.db
-        .prepare(
-          `INSERT INTO tenants (id, slug, config_json, r2_prefix, source, created_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, 'cloud', ?5, ?5)`,
-        )
-        .bind(row.id, row.slug, row.configJson, prefix, row.nowIso),
-      this.db
-        .prepare("INSERT INTO tenant_domains (hostname, tenant_id, kind, created_at) VALUES (?1, ?2, 'subdomain', ?3)")
-        .bind(row.hostname, row.id, row.nowIso),
-      this.db
-        .prepare("INSERT INTO users (id, email, kind, created_at) VALUES (?1, ?2, 'person', ?3) ON CONFLICT DO NOTHING")
-        .bind(row.ownerId, row.ownerEmail, row.nowIso),
-      this.db
-        .prepare(
-          `INSERT INTO memberships (tenant_id, user_id, role, created_at)
-           SELECT ?1, id, 'owner', ?3 FROM users WHERE email = ?2 AND kind = 'person'`,
-        )
-        .bind(row.id, row.ownerEmail, row.nowIso),
-    ]);
-    return Object.freeze({ id: row.id, slug: row.slug, r2Prefix: prefix, source: "cloud" as const });
+    const statements = provisionTenantStatements({ ...row, source: "cloud" });
+    await this.db.batch(statements.map((s) => this.db.prepare(s.sql).bind(...s.params)));
+    return Object.freeze({ id: row.id, slug: row.slug, r2Prefix: `t/${row.id}/`, source: "cloud" as const });
   }
 }
