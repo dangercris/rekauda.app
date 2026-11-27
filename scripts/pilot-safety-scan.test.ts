@@ -159,10 +159,9 @@ describe("the production data path (reads and the import file)", () => {
 
 
   it("insert accepts one tenant INSERT only (allowed table, tenant UUID, single statement, pilot_import source), put only the staged QR into the receipts bucket", () => {
-    expect(remote).toContain("!INSERTABLE.test(sql) || !UUID_LITERAL.test(sql) || !isSingleStatement(sql) || (sql.startsWith(\"INSERT INTO tenants \") && !TENANT_SOURCE.test(sql))");
-    expect(wrapper).toContain("const INSERTABLE = /^INSERT INTO (tenants|tenant_domains|users|memberships) \\(/;");
+    expect(remote).toContain("!matchProvisionInsert(sql, expect)");
     expect(remote).toContain('b.binding === "RECEIPTS"');
-    expect(remote).toContain("!UUID.test(tenantId) || !Object.hasOwn(QR_TYPES, ext) || QR_TYPES[ext] !== contentType || !isAbsolute(file) || basename(file) !== `deuna-qr.${ext}`");
+    expect(remote).toContain("tenantId !== expect?.tenantId || !UUID.test(tenantId) || !Object.hasOwn(QR_TYPES, ext) || QR_TYPES[ext] !== contentType || !isStagedQr(file, expect.dir, ext)");
   });
 
   // Every remote.<method>( call site in the data modules (import and provision), and nothing else may reach the remote.

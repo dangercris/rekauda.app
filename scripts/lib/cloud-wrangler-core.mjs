@@ -10,9 +10,9 @@
 // and wrangler.production.jsonc, and every one that changes something also needs a typed confirmation from a TTY.
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { buildSandboxSeedSql } from "./cloud-sandbox-seed.mjs";
 import { loadAndCheck, loadAndCheckProduction, loadAndCheckSandbox, report } from "./cloud-guard-io.mjs";
 import { confirmTyped } from "./confirm.mjs";
@@ -23,7 +23,8 @@ import { runUndo } from "./import/undo.mjs";
 import { runValidate } from "./import/validate.mjs";
 import { runPilotCleanup, runPilotExport } from "./pilot-export.mjs";
 import { openWorkdir } from "./private-workdir.mjs";
-import { prepareProvision, runProvision } from "./provision/provision.mjs";
+import { matchProvisionInsert } from "./provision/insert-guard.mjs";
+import { prepareProvision, readOwnerState, runProvision } from "./provision/provision.mjs";
 import { QR_TYPES } from "./provision/qr.mjs";
 
 const SUBCOMMANDS = ["dev", "d1", "types"];
@@ -159,24 +160,27 @@ function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confir
 // What `mutate` accepts: one DELETE on a tenant table, naming a tenant UUID and the pilot_import source guard.
 const MUTABLE = /^DELETE FROM (bank_movements|students|payments|collections|sessions|magic_links|memberships|users|tenant_domains|tenants) WHERE /;
 const UUID_LITERAL = /'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'/;
-// What `insert` accepts: one INSERT into a tenant-platform table naming a tenant UUID. A tenant row must carry the t/<id>/ prefix
-// followed by the pilot_import source, exactly where provisionTenantStatements puts them.
-const INSERTABLE = /^INSERT INTO (tenants|tenant_domains|users|memberships) \(/;
-const TENANT_SOURCE = /, 't\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/', 'pilot_import', /;
-
-/** True for exactly one statement: with the string literals removed it has no quote, comment or semicolon left except the last character. */
-function isSingleStatement(sql) {
-  const bare = sql.replace(/'(?:[^']|'')*'/g, "");
-  return bare.endsWith(";") && !bare.slice(0, -1).includes(";") && !bare.includes("'") && !/--|\/\*/.test(bare);
+/**
+ * True for the file the QR step staged: the real path of <workdir>/qr-XXXX/deuna-qr.<ext>, a plain file (no symlink anywhere), inside
+ * the private staging directory of THIS workdir.
+ */
+function isStagedQr(file, dir, ext) {
+  try {
+    const stat = lstatSync(file);
+    return stat.isFile() && realpathSync(file) === file && basename(file) === `deuna-qr.${ext}` && dirname(dirname(file)) === dir && /^qr-[A-Za-z0-9]+$/.test(basename(dirname(file)));
+  } catch {
+    return false;
+  }
 }
 
 /**
  * The remote of the production data commands: `select` runs ONE SELECT, `mutate` ONE scoped DELETE (the undo), `insert` ONE tenant INSERT
  * (provisioning), `file` runs the plan file, all as the fixed d1 argv against the fixed production config; `put` is the one fixed
- * R2 upload of the tenant QR (receipts bucket, key t/<id>/assets/deuna-qr.<ext>, same config). The guard runs again before every spawn and the config must be unchanged. stdout and
+ * R2 upload of the tenant QR (receipts bucket, key t/<id>/assets/deuna-qr.<ext>, same config). `expect` is { tenantId, ownerId, dir }
+ * of the provisioning run: insert and put refuse anything that is not exactly that tenant, owner and staged file. The guard runs again before every spawn and the config must be unchanged. stdout and
  * stderr are captured and never shown (they can hold personal data). Failures are generic.
  */
-export function productionRemote({ root, bin, spawn, env, log, checkFn, target, methods }) {
+export function productionRemote({ root, bin, spawn, env, log, checkFn, target, methods, expect }) {
   const checked = JSON.stringify(target);
   const exec = (argv) => {
     const again = checkFn({ root });
@@ -200,7 +204,7 @@ export function productionRemote({ root, bin, spawn, env, log, checkFn, target, 
       invoke("--command", sql);
     },
     insert(sql) {
-      if (!INSERTABLE.test(sql) || !UUID_LITERAL.test(sql) || !isSingleStatement(sql) || (sql.startsWith("INSERT INTO tenants ") && !TENANT_SOURCE.test(sql))) throw new Error("not a single tenant INSERT");
+      if (!matchProvisionInsert(sql, expect)) throw new Error("not a provisioning INSERT");
       invoke("--command", sql);
     },
     file(path) {
@@ -209,7 +213,7 @@ export function productionRemote({ root, bin, spawn, env, log, checkFn, target, 
     },
     put({ tenantId, ext, contentType, file }) {
       const bucket = target.r2_buckets?.find((b) => b.binding === "RECEIPTS")?.bucket_name;
-      if (!UUID.test(tenantId) || !Object.hasOwn(QR_TYPES, ext) || QR_TYPES[ext] !== contentType || !isAbsolute(file) || basename(file) !== `deuna-qr.${ext}` || typeof bucket !== "string") throw new Error("not the QR upload");
+      if (tenantId !== expect?.tenantId || !UUID.test(tenantId) || !Object.hasOwn(QR_TYPES, ext) || QR_TYPES[ext] !== contentType || !isStagedQr(file, expect.dir, ext) || typeof bucket !== "string") throw new Error("not the QR upload");
       exec(["r2", "object", "put", `${bucket}/t/${tenantId}/assets/deuna-qr.${ext}`, "--file", file, "--content-type", contentType, "--remote", ...PRODUCTION_CONFIG]);
     },
   };
@@ -242,14 +246,32 @@ function runProductionData(subcommand, args, { root, bin, spawn, log, env, confi
     }
     [tenantId, slug] = [randomUUID(), prepared.input.slug];
   }
+  const ownerId = provisioning ? randomUUID() : undefined;
   const checkFn = ({ root: r }) => loadAndCheckProduction({ root: r, apex: "any" });
   const checked = firstCheck(checkFn, root, log);
   if (!checked) return 1;
   const { target } = checked;
   log.warn(`[cloud-wrangler] ${subcommand}: worker=${target.name} account=${target.account_id ?? "(not set)"} root=${target.vars.ROOT_DOMAIN} tenant=${tenantId} slug=${slug}`);
-  if (!confirm(`${phrase} ${slug}`)) return refuse("needs the typed confirmation phrase on a terminal.");
-  const remote = productionRemote({ root, bin, spawn, env, log, checkFn, target, methods });
-  return run({ ...opened, tenantId, slug, prepared }, { remote, log, target, now });
+  const remote = productionRemote({ root, bin, spawn, env, log, checkFn, target, methods, expect: provisioning ? { tenantId, ownerId, dir: opened.dir } : null });
+  let typed = `${phrase} ${slug}`;
+  let reuseOwner = false;
+  if (provisioning) {
+    // One fixed read before the phrase: an existing account that would become the owner needs its own phrase.
+    let owner;
+    try {
+      owner = readOwnerState(remote, prepared.input.ownerEmail);
+    } catch {
+      return refuse("could not read the owner state (no details are shown on purpose).");
+    }
+    if (owner === "synthetic") return refuse("the owner email belongs to a system account.");
+    if (owner === "person") {
+      reuseOwner = true;
+      typed += " REUSE OWNER";
+      log.warn("[cloud-wrangler] prod:provision: the owner email belongs to an existing account. That existing account will become the owner of the new tenant.");
+    }
+  }
+  if (!confirm(typed)) return refuse("needs the typed confirmation phrase on a terminal.");
+  return run({ ...opened, tenantId, ownerId, slug, prepared, reuseOwner }, { remote, log, target, now });
 }
 
 /** root ends with a slash. Returns the exit status. */

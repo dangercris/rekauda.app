@@ -1,8 +1,12 @@
-import { chmodSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseJsonc } from "./lib/jsonc.mjs";
 import example from "../rekauda.config.example";
+import { provisionTenantStatements } from "../src/worker/tenancy/provision-sql";
+// @ts-expect-error plain .mjs module without types
+import { render } from "./lib/provision/provision.mjs";
 import { SLUG, makePilotWorld } from "./lib/import/pilot-world";
 import { TENANT_ID } from "./lib/import/pilot-fixture";
 // @ts-expect-error plain .mjs module without types
@@ -305,13 +309,37 @@ describe("prod:provision through the wrapper", () => {
     expect([...w.notes, ...w.errors].join("\n")).not.toMatch(new RegExp(`tok-secret-1|${handover.slice(2, 34)}|owner@example|in\\.${ROOT_DOMAIN}`));
   });
 
-  it("spawns nothing without the exact phrase or a terminal", () => {
+  it("writes nothing without the exact phrase or a terminal (only the owner pre-check read runs before it)", () => {
     for (const [typed, tty] of [["PROVISION other-demo", true], ["provision curso-demo", true], [`PROVISION ${SLUG}`, false], [undefined, true]] as const) {
       const w = provisioning();
       w.state.tty = tty;
       expect(w.run("prod:provision", [w.dir], typed)).toBe(1);
-      expect(w.calls).toEqual([]);
+      expect(w.calls.every((c) => c.argv[8]?.startsWith("SELECT "))).toBe(true);
+      expect(w.calls.length).toBeLessThanOrEqual(1);
+      expect(w.cloud.sqlite.prepare("SELECT COUNT(*) AS n FROM tenants").get()).toEqual({ n: 0 });
     }
+  });
+
+  it("an owner email that belongs to a system account is refused before the phrase is asked", () => {
+    const w = provisioning();
+    w.cloud.sqlite.exec("INSERT INTO users (id, email, kind, created_at) VALUES ('u-sys', 'owner@example.test', 'synthetic', 'x')");
+    expect(w.run("prod:provision", [w.dir], `PROVISION ${SLUG}`)).toBe(1);
+    expect(w.asked).toEqual([]);
+    expect([...w.notes, ...w.errors].join("\n")).not.toMatch(/owner@example/);
+  });
+
+  it("an existing person as owner needs the phrase PROVISION <slug> REUSE OWNER, says so without printing the email, and the normal phrase is not enough", () => {
+    const refused = provisioning();
+    refused.cloud.sqlite.exec("INSERT INTO users (id, email, kind, created_at) VALUES ('u-old', 'owner@example.test', 'person', 'x')");
+    expect(refused.run("prod:provision", [refused.dir], `PROVISION ${SLUG}`)).toBe(1);
+    expect(refused.asked).toEqual([`PROVISION ${SLUG} REUSE OWNER`]);
+    expect(refused.calls.every((c) => c.argv[8]?.startsWith("SELECT "))).toBe(true);
+    const w = provisioning();
+    w.cloud.sqlite.exec("INSERT INTO users (id, email, kind, created_at) VALUES ('u-old', 'owner@example.test', 'person', 'x')");
+    expect(w.run("prod:provision", [w.dir], `PROVISION ${SLUG} REUSE OWNER`)).toBe(0);
+    expect(w.notes.join("\n")).toMatch(/existing account will become the owner/);
+    expect([...w.notes, ...w.errors].join("\n")).not.toMatch(/owner@example/);
+    expect(w.cloud.sqlite.prepare("SELECT user_id FROM memberships").get()).toEqual({ user_id: "u-old" });
   });
 
   it.each([
@@ -347,68 +375,120 @@ describe("prod:provision through the wrapper", () => {
     const w = provisioning();
     expect(w.run("prod:provision", [w.dir], `PROVISION ${SLUG}`)).toBe(0);
     const id = /tenant=([0-9a-f-]{36})/.exec(w.notes[0]!)![1]!;
-    expect(JSON.parse(readFileSync(join(w.dir, "manifest.json"), "utf8")).tenant).toEqual({ id, slug: SLUG });
+    expect(JSON.parse(readFileSync(join(w.dir, "manifest.json"), "utf8")).tenant).toEqual({ id, slug: SLUG, state: "provisioned" });
   });
 });
 
-describe("insert enforces the INSERT-only scoping at the chokepoint", () => {
+describe("insert accepts only the four rendered provisioning statements for the expected tenant and owner", () => {
   const ID = "c0000000-0000-4000-8000-0000000000c1";
-  const tenants = `INSERT INTO tenants (id, slug, config_json, r2_prefix, source, qr_key, inbound_token_hash, created_at, updated_at) VALUES ('${ID}', 'curso-demo', '{"a":"x; y -- z"}', 't/${ID}/', 'pilot_import', NULL, NULL, 'n', 'n');`;
-  const members = `INSERT INTO memberships (tenant_id, user_id, role, created_at) SELECT '${ID}', id, 'owner', 'n' FROM users WHERE email = 'o@example.test' AND kind = 'person';`;
-  const run = (sql: string) => {
+  const OTHER = "d0000000-0000-4000-8000-0000000000d1";
+  const OWNER = "e0000000-0000-4000-8000-0000000000e1";
+  const row = { id: ID, slug: "curso-demo", hostname: "curso-demo.example.test", configJson: '{"a":"x; y -- z \'quoted\'"}', ownerEmail: "o@example.test", ownerId: OWNER, nowIso: "2026-11-27T00:00:00Z", source: "pilot_import" as const, qrKey: `t/${ID}/assets/deuna-qr.png`, inboundTokenHash: "ab".repeat(32) };
+  const rendered = (over: Record<string, unknown> = {}) => provisionTenantStatements({ ...row, ...over }).map(render) as string[];
+  const good = rendered();
+  const run = (sql: string, expectation: unknown = { tenantId: ID, ownerId: OWNER, dir: "/x" }) => {
+    // null means "no expectation" (undefined would take the default)
     const seen: string[][] = [];
-    const remote = productionRemote({ root: "/x/", bin: "w", spawn: (_b: string, argv: string[]) => (seen.push(argv), { status: 0, stdout: "[]" }), env: {}, log: console, checkFn: () => ({ result: { ok: true, warnings: [], violations: [] }, target: {} }), target: {}, methods: ["insert"] });
+    const remote = productionRemote({ root: "/x/", bin: "w", spawn: (_b: string, argv: string[]) => (seen.push(argv), { status: 0, stdout: "[]" }), env: {}, log: console, checkFn: () => ({ result: { ok: true, warnings: [], violations: [] }, target: {} }), target: {}, methods: ["insert"], expect: expectation });
     return { call: () => remote.insert(sql), seen };
   };
-  it.each([["a tenant row with semicolons and dashes inside a literal", tenants], ["the membership select", members]])("sends %s", (_n, sql) => {
-    const { call, seen } = run(sql);
+  it.each([0, 1, 2, 3])("sends rendered statement %i as it is", (i) => {
+    const { call, seen } = run(good[i]!);
     call();
     expect(seen).toHaveLength(1);
-    expect(seen[0]!.slice(-2)).toEqual(["--command", sql]);
+    expect(seen[0]!.slice(-2)).toEqual(["--command", good[i]]);
+  });
+  it("sends the tenant row without a QR key or token hash too", () => {
+    const { call, seen } = run(rendered({ qrKey: null, inboundTokenHash: null })[0]!);
+    call();
+    expect(seen).toHaveLength(1);
   });
   it.each([
-    ["a DELETE", tenants.replace("INSERT INTO", "DELETE FROM")],
-    ["an UPDATE", tenants.replace("INSERT INTO", "UPDATE")],
-    ["a table that is not allowed", tenants.replace("INTO tenants", "INTO payments")],
-    ["no tenant UUID literal", tenants.replaceAll(ID, "x")],
-    ["a tenant that is not pilot_import", tenants.replace("'pilot_import'", "'cloud'")],
-    ["two statements", tenants + " " + members],
-    ["a statement after an unbalanced quote", tenants.replace("'n');", "'n'); DROP TABLE users; --'")],
-    ["a trailing comment", tenants + " -- x"],
-    ["no terminating semicolon", tenants.slice(0, -1)],
+    ["ON CONFLICT DO UPDATE on the user", good[2]!.replace("DO NOTHING", "DO UPDATE SET email = 'x@example.test'")],
+    ["an INSERT ... SELECT from another table", "INSERT INTO tenant_domains (hostname, tenant_id, kind, created_at) SELECT 'x', id, 'subdomain', 'n' FROM tenants;"],
+    ["a membership for another tenant", good[3]!.replace(ID, OTHER)],
+    ["a membership whose email is a subquery", good[3]!.replace("'o@example.test'", "(SELECT email FROM users LIMIT 1)")],
+    ["a hostname that is a subquery", good[1]!.replace("'curso-demo.example.test'", "(SELECT slug FROM tenants LIMIT 1)")],
+    ["a domain for another tenant", good[1]!.replace(ID, OTHER)],
+    ["a tenants row with pilot_import only inside the config", rendered({ source: "cloud", configJson: `{"x":"', 'pilot_import', '"}` })[0]!],
+    ["a tenants row for another tenant id", rendered({ id: OTHER, qrKey: `t/${OTHER}/assets/deuna-qr.png` })[0]!],
+    ["a tenants row whose QR key points at another tenant", rendered({ qrKey: `t/${OTHER}/assets/deuna-qr.png` })[0]!],
+    ["a tenants row with a QR key outside assets", rendered({ qrKey: `t/${ID}/receipts/x.png` })[0]!],
+    ["a tenants row with a hash that is not 64 hex characters", rendered({ inboundTokenHash: "abc" })[0]!],
+    ["a user with an id other than the expected owner", rendered({ ownerId: OTHER })[2]!],
+    ["a user row whose id is not a UUID", rendered({ ownerId: "u-1" })[2]!],
+    ["two statements", good[0] + " " + good[1]],
+    ["a trailing comment", good[0] + " -- x"],
+    ["a different spacing", good[0]!.replace("INSERT INTO", "INSERT  INTO")],
+    ["a DELETE", good[0]!.replace("INSERT INTO", "DELETE FROM")],
+    ["an unbalanced quote", good[1]!.replace("'subdomain'", "'subdomain")],
   ])("refuses %s without spawning", (_n, sql) => {
     const { call, seen } = run(sql);
     expect(call).toThrow();
     expect(seen).toEqual([]);
   });
+  it("refuses everything when the command has no expected tenant, or the expectation is not UUIDs", () => {
+    for (const expectation of [null, { tenantId: "x", ownerId: OWNER, dir: "/x" }, { tenantId: ID, ownerId: "x", dir: "/x" }]) {
+      const { call, seen } = run(good[0]!, expectation);
+      expect(call).toThrow();
+      expect(seen).toEqual([]);
+    }
+  });
 });
 
-describe("put is the one fixed R2 upload of the QR", () => {
+describe("put is the one fixed R2 upload of the staged QR", () => {
   const ID = "c0000000-0000-4000-8000-0000000000c1";
+  const OWNER = "e0000000-0000-4000-8000-0000000000e1";
   const target = { r2_buckets: [{ binding: "RECEIPTS", bucket_name: "rekauda-cloud-files" }, { binding: "MAIL_ARCHIVE", bucket_name: "rekauda-cloud-mail" }] };
-  const run = (spec: Record<string, unknown>, t: unknown = target) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "put-dir-")));
+  const staged = (name: string, file = "deuna-qr.webp") => {
+    mkdirSync(join(dir, name), { recursive: true });
+    writeFileSync(join(dir, name, file), "x");
+    return join(dir, name, file);
+  };
+  const good = { tenantId: ID, ext: "webp", contentType: "image/webp", file: staged("qr-abc") };
+  const run = (spec: Record<string, unknown>, t: unknown = target, expectation: unknown = { tenantId: ID, ownerId: OWNER, dir }) => {
+    // null means "no expectation" (undefined would take the default)
     const seen: string[][] = [];
-    const remote = productionRemote({ root: "/x/", bin: "w", spawn: (_b: string, argv: string[]) => (seen.push(argv), { status: 0, stdout: "" }), env: {}, log: console, checkFn: () => ({ result: { ok: true, warnings: [], violations: [] }, target: t }), target: t, methods: ["put"] });
+    const remote = productionRemote({ root: "/x/", bin: "w", spawn: (_b: string, argv: string[]) => (seen.push(argv), { status: 0, stdout: "" }), env: {}, log: console, checkFn: () => ({ result: { ok: true, warnings: [], violations: [] }, target: t }), target: t, methods: ["put"], expect: expectation });
     return { call: () => remote.put(spec), seen };
   };
-  const good = { tenantId: ID, ext: "webp", contentType: "image/webp", file: "/w/qr-abc/deuna-qr.webp" };
-  it("uploads to the receipts bucket under the tenant prefix only", () => {
+  it("uploads to the receipts bucket under the expected tenant prefix only", () => {
     const { call, seen } = run(good);
     call();
     expect(seen).toEqual([["r2", "object", "put", `rekauda-cloud-files/t/${ID}/assets/deuna-qr.webp`, "--file", good.file, "--content-type", "image/webp", "--remote", ...PROD_CONFIG]]);
   });
+  const link = join(dir, "qr-link");
+  symlinkSync(join(dir, "qr-abc"), link);
+  const fileLink = (() => {
+    mkdirSync(join(dir, "qr-file"), { recursive: true });
+    symlinkSync(good.file, join(dir, "qr-file", "deuna-qr.webp"));
+    return join(dir, "qr-file", "deuna-qr.webp");
+  })();
+  const OTHER_DIR = realpathSync(mkdtempSync(join(tmpdir(), "put-other-")));
+  mkdirSync(join(OTHER_DIR, "qr-abc"));
+  writeFileSync(join(OTHER_DIR, "qr-abc", "deuna-qr.webp"), "x");
   it.each([
     ["a tenant id that is not a UUID", { ...good, tenantId: "../x" }],
-    ["an extension that is not allowed", { ...good, ext: "svg", file: "/w/qr-abc/deuna-qr.svg", contentType: "image/svg+xml" }],
+    ["a tenant other than the expected one", { ...good, tenantId: "d0000000-0000-4000-8000-0000000000d1" }],
+    ["an extension that is not allowed", { ...good, ext: "svg", file: staged("qr-abc", "deuna-qr.svg"), contentType: "image/svg+xml" }],
     ["a content type that does not match the extension", { ...good, contentType: "text/html" }],
-    ["a file that is not the staged deuna-qr file", { ...good, file: "/w/qr-abc/other.webp" }],
+    ["a file that is not named deuna-qr.<ext>", { ...good, file: staged("qr-abc", "other.webp") }],
+    ["a device path", { ...good, file: "/dev/deuna-qr.webp" }],
+    ["a path with dot-dot segments", { ...good, file: `${dir}/qr-abc/../qr-abc/deuna-qr.webp` }],
+    ["a staging directory that is a symlink", { ...good, file: join(link, "deuna-qr.webp") }],
+    ["a staged file that is a symlink", { ...good, file: fileLink }],
+    ["a file outside a qr-* staging directory", { ...good, file: staged("other-dir") }],
+    ["a staged file of another workdir", { ...good, file: join(OTHER_DIR, "qr-abc", "deuna-qr.webp") }],
+    ["a file that does not exist", { ...good, file: join(dir, "qr-abc", "gone", "deuna-qr.webp") }],
     ["a flag-like file path", { ...good, file: "--x/deuna-qr.webp" }],
   ])("refuses %s without spawning", (_n, spec) => {
     const { call, seen } = run(spec);
     expect(call).toThrow();
     expect(seen).toEqual([]);
   });
-  it("refuses when the checked config has no RECEIPTS bucket", () => {
+  it("refuses without an expectation, and when the checked config has no RECEIPTS bucket", () => {
+    expect(run(good, target, null).call).toThrow();
     const { call, seen } = run(good, { r2_buckets: [{ binding: "MAIL_ARCHIVE", bucket_name: "rekauda-cloud-mail" }] });
     expect(call).toThrow();
     expect(seen).toEqual([]);

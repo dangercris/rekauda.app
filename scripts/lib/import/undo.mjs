@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { IMPORT_TABLES } from "./columns.mjs";
 import { COLLISION_TABLES } from "./collisions.mjs";
+import { readManifest, writeManifest } from "../private-workdir.mjs";
 import { loadPlanIds } from "./plan.mjs";
 import { SLUG, UUID, readRowCounts, readTenant } from "./target.mjs";
 
@@ -44,10 +45,13 @@ export function runUndo({ dir, manifest, tenantId, slug, tenantLevel }, { remote
   const refuse = (why) => (log.error(`[undo] REFUSED: ${why}`), 1);
   if (!UUID.test(tenantId) || !SLUG.test(slug)) return refuse("bad tenant id or slug.");
   let plan;
+  let planless = false;
   try {
     plan = loadPlanIds(dir, manifest, tenantId);
   } catch {
-    return refuse(REFUSE_WORKDIR);
+    // Only a tenant-level undo of the tenant this workdir provisioned may go on without a plan (a provisioning that did not finish).
+    if (!tenantLevel || manifest?.tenant?.id !== tenantId) return refuse(REFUSE_WORKDIR);
+    planless = true;
   }
   let statements = [];
   let userIds = [];
@@ -56,11 +60,13 @@ export function runUndo({ dir, manifest, tenantId, slug, tenantLevel }, { remote
     if (tenant === null && tenantLevel) userIds = recordedUsers(dir);
     else {
       if (tenant?.source !== "pilot_import" || tenant.slug !== slug) return refuse("the target tenant is not the expected pilot_import tenant.");
-      for (const table of COLLISION_TABLES) {
+      // Without a plan the proof that the tenant is not live is that it has no row at all in the four data tables.
+      if (planless && IMPORT_TABLES.some((t) => readRowCounts(remote, tenantId)[t] !== 0)) return refuse("the tenant has data and there is no import plan; remove it by hand as the runbook describes. Nothing was deleted.");
+      for (const table of planless ? [] : COLLISION_TABLES) {
         const rows = remote.select(`SELECT id FROM ${table} WHERE tenant_id = '${tenantId}' ORDER BY id;`);
         if (rows.some((row) => !plan.ids[table].has(row.id))) return refuse("the tenant has data that is not part of the import (it may be live). Nothing was deleted.");
       }
-      if (readRowCounts(remote, tenantId).students > plan.students) return refuse("the tenant has data that is not part of the import (it may be live). Nothing was deleted.");
+      if (!planless && readRowCounts(remote, tenantId).students > plan.students) return refuse("the tenant has data that is not part of the import (it may be live). Nothing was deleted.");
       if (tenantLevel) {
         const members = remote.select(`SELECT user_id FROM memberships WHERE tenant_id = '${tenantId}';`).map((row) => row.user_id);
         userIds = [...new Set([...recordedUsers(dir), ...members])];
@@ -82,6 +88,11 @@ export function runUndo({ dir, manifest, tenantId, slug, tenantLevel }, { remote
       left = left || rest.length !== 1 || Object.values(rest[0]).some((n) => n !== 0) || readTenant(remote, tenantId) !== null;
     }
     if (left) throw new Error("rows remain");
+    // The tenant is gone: the workdir may provision (and plan) again.
+    if (tenantLevel && readManifest(dir).tenant?.id === tenantId) {
+      const { tenant, plan: stale, ...rest } = readManifest(dir);
+      writeManifest(dir, rest);
+    }
   } catch {
     log.error("[undo] FAILED: the undo is not complete (no details are shown on purpose). It is safe to run it again.");
     return 1;
