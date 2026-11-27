@@ -1,0 +1,66 @@
+{
+  // Rekauda Cloud PRODUCTION. Copy to wrangler.production.jsonc BY HAND (gitignored, never auto-copied) and fill in
+  // invented-looking placeholders below with your real values. Every pnpm prod:* command runs the production guard first:
+  //   - Worker, D1 and both R2 buckets start with "rekauda-cloud-"; exactly 3 ratelimits; no placeholder ids
+  //   - nothing equals a pilot or sandbox name or id (account_id may equal the pilot's: same account)
+  //   - vars: only TENANCY, ROOT_DOMAIN, INBOUND_DOMAIN and optionally LEGACY_REDIRECTS
+  //   - routes: exactly the wildcard; the apex entry is added only for pnpm prod:switch-apex
+  // Example values below use example.test and are not real.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+
+  "name": "rekauda-cloud-app",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-11-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+
+  // Wildcard only. For the switch step add ONE of { "pattern": "<root>/*", "zone_name": "<root>" } or
+  // { "pattern": "<root>", "custom_domain": true }; prod:deploy refuses it and prod:switch-apex requires it.
+  "routes": [{ "pattern": "*.colegio-demo.example.test/*", "zone_name": "colegio-demo.example.test" }],
+
+  "vars": {
+    "TENANCY": "multi",
+    "ROOT_DOMAIN": "colegio-demo.example.test",
+    "INBOUND_DOMAIN": "in.colegio-demo.example.test"
+    // "LEGACY_REDIRECTS": { "/r/curso-demo": "https://curso-demo.colegio-demo.example.test/r/curso-demo" }
+  },
+
+  "rules": [{ "type": "Data", "globs": ["**/*.ttf"], "fallthrough": true }],
+
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/*", "!/assets/*", "!/icon.svg"]
+  },
+
+  // The all-zero id is a placeholder and is refused.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rekauda-cloud-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations-cloud"
+    }
+  ],
+
+  "r2_buckets": [
+    { "binding": "RECEIPTS", "bucket_name": "rekauda-cloud-files" },
+    { "binding": "MAIL_ARCHIVE", "bucket_name": "rekauda-cloud-mail" }
+  ],
+
+  "images": { "binding": "IMAGES" },
+  "send_email": [{ "name": "SEND_EMAIL" }],
+  "triggers": { "crons": ["17 3 * * *"] },
+
+  // Replace with the real namespace ids; they must differ from the pilot's and the sandbox's. Placeholder 0 is refused.
+  "ratelimits": [
+    { "name": "SUBMIT_LIMITER", "namespace_id": "0", "simple": { "limit": 10, "period": 60 } },
+    { "name": "LOGIN_LIMITER", "namespace_id": "0", "simple": { "limit": 5, "period": 60 } },
+    { "name": "LOOKUP_LIMITER", "namespace_id": "0", "simple": { "limit": 20, "period": 60 } }
+  ],
+
+  "observability": { "enabled": true }
+}

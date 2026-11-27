@@ -159,7 +159,8 @@ const SANDBOX_LIST_KEYS = {
   ratelimits: ["name", "namespace_id", "simple"],
 };
 
-const isSandboxName = (value) => typeof value === "string" && value.startsWith(SANDBOX_NAME_PREFIX) && value.length >= 3 && value.length <= 40 && WORKER_SLUG.test(value) && !value.includes("--") && !value.endsWith("-");
+const isPrefixedName = (value, prefix) => typeof value === "string" && value.startsWith(prefix) && value.length >= 3 && value.length <= 40 && WORKER_SLUG.test(value) && !value.includes("--") && !value.endsWith("-");
+const isSandboxName = (value) => isPrefixedName(value, SANDBOX_NAME_PREFIX);
 
 /** 32 hex digits (UUID without hyphens or braces, account id), else null. */
 const hexForm = (value) => {
@@ -168,7 +169,7 @@ const hexForm = (value) => {
 };
 
 /** Pilot knowledge for sandbox mode: everything to compare against, and the categories that must be known. */
-function sandboxPilot(pilot, pilotExample, extra) {
+function sandboxPilot(pilot, pilotExample, extra, withRatelimits = false) {
   const problems = [];
   let ex = {};
   if (extra !== null && extra !== undefined) {
@@ -193,6 +194,10 @@ function sandboxPilot(pilot, pilotExample, extra) {
     "D1 id": ids([...asArray(p.d1_databases).map((db) => db?.database_id), ...list("d1Ids"), ...list("ids")]),
     "R2 bucket": names([...asArray(p.r2_buckets).map((b) => b?.bucket_name), ...list("buckets")]),
   };
+  if (withRatelimits) {
+    const limiterIds = [...asArray(p.ratelimits).map((r) => r?.namespace_id), ...list("ratelimitIds")];
+    categories["ratelimit id"] = new Set(limiterIds.filter((v) => (typeof v === "string" || typeof v === "number") && !isPlaceholder(v) && norm(v) !== "").map(norm));
+  }
   // Comparison set: every non-placeholder pilot value, example-equal ones included (an id never gets exempted for matching an example).
   const everything = [...extractResources(p).values, ...list("names"), ...list("ids"), ...list("workers"), ...list("d1Ids"), ...list("buckets"), ...list("ratelimitIds"), ...Object.values(categories).flatMap((c) => [...c])];
   const values = new Set(everything.map(norm).filter((v) => v !== "" && !isPlaceholder(v)));
@@ -256,5 +261,88 @@ export function checkSandboxConfig({ target, targetFile, pilot, pilotExample, ex
   if (databases.some((db) => typeof db?.database_name !== "string" || !db.database_name.startsWith(SANDBOX_NAME_PREFIX))) refuse("d1_databases.database_name", `must start with ${SANDBOX_NAME_PREFIX}`);
   if (databases.some((db) => typeof db?.database_id !== "string" || isPlaceholder(db.database_id))) refuse("d1_databases.database_id", "placeholder id: not allowed for remote");
   if (asArray(target.r2_buckets).some((b) => typeof b?.bucket_name !== "string" || !b.bucket_name.startsWith(SANDBOX_NAME_PREFIX))) refuse("r2_buckets.bucket_name", `must start with ${SANDBOX_NAME_PREFIX}`);
+  return { ok: violations.length === 0, violations, warnings: [] };
+}
+
+const PRODUCTION_CONFIG_FILE = "wrangler.production.jsonc";
+export const PRODUCTION_NAME_PREFIX = "rekauda-cloud-";
+const PRODUCTION_TOP_KEYS = [...SANDBOX_TOP_KEYS, "routes", "send_email", "triggers"];
+const PRODUCTION_VARS = ["TENANCY", "ROOT_DOMAIN", "INBOUND_DOMAIN", "LEGACY_REDIRECTS"];
+const APEX_POLICIES = ["forbid", "require", "any"];
+const DNS_NAME = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/;
+const isProdName = (value) => isPrefixedName(value, PRODUCTION_NAME_PREFIX);
+
+/** Legacy map: at most 20 entries, key /r/<slug>, value https://<slug>.<root>/r/<same slug>. Same rules as the Worker's parser (S7). */
+function legacyRedirectsValid(map, root) {
+  if (!isObject(map) || Object.keys(map).length > 20) return false;
+  return Object.entries(map).every(([key, value]) => {
+    const slug = /^\/r\/([a-z0-9-]{1,48})$/.exec(key)?.[1];
+    return slug !== undefined && value === `https://${slug}.${root}/r/${slug}`;
+  });
+}
+
+/** Routes must be exactly the wildcard, plus one apex entry (route or custom domain) depending on the command's apex policy. */
+function checkProductionRoutes(target, root, apex, refuse) {
+  if ("route" in target || !Array.isArray(target.routes)) return refuse("route", "use a routes list: exactly the wildcard entry, plus the apex only in the switch step");
+  const wildcard = (r) => isObject(r) && r.pattern === `*.${root}/*` && r.zone_name === root && Object.keys(r).length === 2;
+  const apexEntry = (r) => isObject(r) && ((r.pattern === `${root}/*` && r.zone_name === root && Object.keys(r).length === 2) || (r.pattern === root && r.custom_domain === true && Object.keys(r).length === 2));
+  const apexes = target.routes.filter(apexEntry);
+  if (target.routes.filter(wildcard).length !== 1 || apexes.length > 1 || target.routes.length !== 1 + apexes.length) refuse("routes", "routes must be the *.<root>/* wildcard and at most one apex entry");
+  else if (apex === "forbid" && apexes.length === 1) refuse("routes", "the apex is only allowed in the switch step (prod:switch-apex)");
+  else if (apex === "require" && apexes.length === 0) refuse("routes", "the switch step needs the apex entry in the config");
+}
+
+/**
+ * Remote check for the production Worker. Fails closed. Nothing may equal pilot data (worker, D1 id, R2 bucket and
+ * ratelimit ids must all be known) or sandbox data; account_id is the only exemption. `apex` is the command's policy:
+ * "forbid" (deploy), "require" (switch-apex) or "any" (guard, migrate, status). Output never contains ids, names or secrets.
+ */
+export function checkProductionConfig({ target, targetFile, pilot, pilotExample, sandbox, extraDenylist, apex }) {
+  const violations = [];
+  const refuse = (field, reason) => violations.push({ field, reason });
+  if (targetFile !== PRODUCTION_CONFIG_FILE) refuse("config", `production mode only accepts ${PRODUCTION_CONFIG_FILE}`);
+  if (!APEX_POLICIES.includes(apex)) refuse("apex", `unknown apex policy, expected one of ${APEX_POLICIES.join(", ")}`);
+  if (!isObject(target)) return { ok: false, violations: [...violations, { field: "config", reason: "production config missing or not an object" }], warnings: [] };
+
+  const { known, missing, problems } = sandboxPilot(pilot, pilotExample, extraDenylist, true);
+  for (const problem of problems) refuse("pilot", problem);
+  if (missing.length > 0) refuse("pilot", `pilot data incomplete, missing: ${missing.join(", ")} (see wrangler.sandbox.example.jsonc)`);
+  deepScan(target, [], known, violations, ["account_id"]);
+
+  const sandboxValues = new Set(extractResources(isObject(sandbox) ? { ...sandbox, account_id: undefined } : {}).values);
+  const sandboxScan = [];
+  deepScan(target, [], { values: sandboxValues }, sandboxScan, ["account_id"]);
+  for (const { field } of sandboxScan) refuse(field, "value matches a sandbox resource");
+
+  for (const key of Object.keys(target)) if (!PRODUCTION_TOP_KEYS.includes(key)) refuse(key, "key not allowed in a production config");
+  if (target.main !== SANDBOX_MAIN) refuse("main", `must be ${SANDBOX_MAIN}`);
+  if (target.workers_dev !== false) refuse("workers_dev", "must be false");
+  if (target.preview_urls !== false) refuse("preview_urls", "must be false");
+  if (!isProdName(target.name)) refuse("name", `must start with ${PRODUCTION_NAME_PREFIX} and be a valid slug`);
+
+  const vars = isObject(target.vars) ? target.vars : {};
+  for (const key of Object.keys(vars)) if (!PRODUCTION_VARS.includes(key)) refuse(`vars.${key}`, "var not allowed in production");
+  const root = typeof vars.ROOT_DOMAIN === "string" ? vars.ROOT_DOMAIN : "";
+  if (vars.TENANCY !== "multi") refuse("vars.TENANCY", 'must be "multi"');
+  if (!DNS_NAME.test(root) || root.endsWith(".workers.dev")) refuse("vars.ROOT_DOMAIN", "must be a DNS name and not workers.dev");
+  if (vars.INBOUND_DOMAIN !== `in.${root}`) refuse("vars.INBOUND_DOMAIN", 'must be "in." + ROOT_DOMAIN');
+  if ("LEGACY_REDIRECTS" in vars && !legacyRedirectsValid(vars.LEGACY_REDIRECTS, root)) refuse("vars.LEGACY_REDIRECTS", "invalid legacy redirect map");
+  checkProductionRoutes(target, root, apex, refuse);
+
+  for (const [key, allowed] of Object.entries({ ...SANDBOX_LIST_KEYS, send_email: ["name"] })) {
+    const entries = target[key];
+    if (Array.isArray(entries) && entries.some((e) => !isObject(e) || Object.keys(e).some((k) => !allowed.includes(k)))) refuse(key, "unknown keys in an entry");
+  }
+  const databases = asArray(target.d1_databases);
+  const buckets = asArray(target.r2_buckets);
+  const limiters = asArray(target.ratelimits);
+  if (databases.length !== 1 || databases[0]?.binding !== "DB") refuse("d1_databases", 'must be exactly one database bound as "DB"');
+  checkDatabases(target, violations);
+  if (databases.some((db) => !isProdName(db?.database_name))) refuse("d1_databases.database_name", `must start with ${PRODUCTION_NAME_PREFIX}`);
+  if (databases.some((db) => typeof db?.database_id !== "string" || isPlaceholder(db.database_id))) refuse("d1_databases.database_id", "placeholder id: not allowed for remote");
+  if (buckets.map((b) => b?.binding).sort().join() !== "MAIL_ARCHIVE,RECEIPTS") refuse("r2_buckets", "must be exactly RECEIPTS and MAIL_ARCHIVE");
+  if (buckets.some((b) => !isProdName(b?.bucket_name))) refuse("r2_buckets.bucket_name", `must start with ${PRODUCTION_NAME_PREFIX}`);
+  if (limiters.length !== 3) refuse("ratelimits", "must be exactly 3 ratelimits");
+  if (limiters.some((r) => (typeof r?.namespace_id !== "string" && typeof r?.namespace_id !== "number") || isPlaceholder(r.namespace_id))) refuse("ratelimits.namespace_id", "placeholder id: not allowed for remote");
   return { ok: violations.length === 0, violations, warnings: [] };
 }
