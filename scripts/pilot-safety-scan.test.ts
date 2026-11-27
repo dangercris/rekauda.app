@@ -171,7 +171,7 @@ describe("the production data path (reads and the import file)", () => {
     "lib/import/apply.mjs": ["file"],
     "lib/import/validate.mjs": ["select"],
     "lib/import/undo.mjs": ["select", "select", "mutate", "select"],
-    "lib/provision/provision.mjs": ["select", "put", "insert", "select"],
+    "lib/provision/provision.mjs": ["select", "select", "put", "insert", "select"],
   } as Record<string, string[]>;
   const importSources = sources.filter((s) => s.name.startsWith("lib/import/"));
   it("only these modules reach the remote, at exactly the allowed call sites", () => {
@@ -230,7 +230,7 @@ describe("the remote is used only in its plain form, in every module the data co
   const wrapper = sources.find((s) => s.name === "lib/cloud-wrangler-core.mjs")!.text;
   const code = (text: string) => text.split("\n").filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join("\n");
   // Anything but `remote.<method>(` is a way to hide a call from the call-site allowlist.
-  const SNEAKY = [/\bremote\s*\?\./, /\bremote\s*\[/, /=\s*remote\b(?!\.\w+\()/, /\.\.\.remote\b/, /\bremote\.(?!\w+\()/, /(?<!\bremote)\.(select|mutate|file)\(/];
+  const SNEAKY = [/\bremote\s*\?\./, /\bremote\s*\[/, /=\s*remote\b(?!\.\w+\()/, /\.\.\.remote\b/, /\bremote\.(?!\w+\()/, /(?<!\bremote)\.(select|mutate|file|insert|put)\(/];
   const violations = (text: string) => SNEAKY.filter((re) => re.test(code(text)));
 
   it("pins the data commands and the methods each one gets (least privilege)", () => {
@@ -251,7 +251,7 @@ describe("the remote is used only in its plain form, in every module the data co
   });
 
   it("catches every way of hiding a call (the fixtures must fail)", () => {
-    for (const bad of ["remote?.mutate(sql);", 'remote["mutate"](sql);', "const { mutate } = remote;", "const r = remote;", "const f = remote.file;", "run(...remote);", "remote.select.call(x, sql);", "other.mutate(sql);"]) expect(violations(bad), bad).not.toEqual([]);
+    for (const bad of ["remote?.mutate(sql);", 'remote["mutate"](sql);', "const { mutate } = remote;", "const r = remote;", "const f = remote.file;", "run(...remote);", "remote.select.call(x, sql);", "other.mutate(sql);", "r.insert(x);", "other.put(y);", "const { insert } = remote;"]) expect(violations(bad), bad).not.toEqual([]);
     for (const good of ["remote.select(sql);", "targetVerdict(remote, plan);", "export function runX({ a }, { remote, log = console }) {", "if (x) remote.file(path);", "const rows = remote.select(sql);"]) expect(violations(good), good).toEqual([]);
   });
 });

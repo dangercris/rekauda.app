@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 // @ts-expect-error plain .mjs module without types
-import { cleanupWorkdir, createWorkdir, openWorkdir } from "./private-workdir.mjs";
+import { cleanupWorkdir, createWorkdir, openWorkdir, readManifest, writeManifest } from "./private-workdir.mjs";
 
 const scratch: string[] = [];
 const fresh = (base: string): string => {
@@ -96,5 +96,28 @@ describe("cleanupWorkdir", () => {
     symlinkSync(real, link);
     expect(() => cleanupWorkdir(link, { root, tmp })).toThrow();
     expect(existsSync(join(real, "manifest.json"))).toBe(true);
+  });
+});
+
+describe("writeManifest", () => {
+  const made = () => {
+    const tmp = fresh("wm-tmp");
+    return createWorkdir({ root: fresh("wm-repo") + "/", tmp });
+  };
+  it("replaces the manifest atomically: mode 0600 and no temp file left", () => {
+    const dir = made();
+    writeManifest(dir, { ...readManifest(dir), tenant: { id: "x" } });
+    expect(readManifest(dir).tenant).toEqual({ id: "x" });
+    expect(mode(join(dir, "manifest.json"))).toBe(0o600);
+    expect(readdirSync(dir)).toEqual(["manifest.json"]);
+  });
+  it("keeps the old manifest when the new one cannot be written", () => {
+    const dir = made();
+    const before = readFileSync(join(dir, "manifest.json"), "utf8");
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(() => writeManifest(dir, circular)).toThrow();
+    expect(readFileSync(join(dir, "manifest.json"), "utf8")).toBe(before);
+    expect(readdirSync(dir)).toEqual(["manifest.json"]);
   });
 });
