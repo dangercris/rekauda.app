@@ -17,6 +17,7 @@ import { readQr, stageQr } from "./qr.mjs";
 import { loadTenantInput } from "./tenant-input.mjs";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const PLAIN_ID = /^[A-Za-z0-9._-]{1,64}$/;
 export const LOCK_FILE = "provision.lock";
 
 /** The validated tenant.json and QR of a workdir. Throws a generic error (before anything is written) when either is invalid. */
@@ -28,13 +29,16 @@ export function prepareProvision(dir) {
 /** One statement with its ?n placeholders replaced by literals (strict renderer), whitespace collapsed, ready for `remote.insert`. */
 export const render = ({ sql, params }) => `${sql.replace(/\s+/g, " ").replace(/\?(\d+)/g, (_, n) => literal(params[Number(n) - 1]))};`;
 
-/** What the owner email is in Cloud now: "none", "person" (an existing account would become owner) or "synthetic" (refused). Throws when unreadable. */
-export function readOwnerState(remote, email) {
-  const rows = remote.select(`SELECT kind FROM users WHERE email = ${literal(email)};`);
-  if (rows.length === 0) return "none";
-  if (rows.length === 1 && (rows[0].kind === "person" || rows[0].kind === "synthetic")) return rows[0].kind;
+/** The owner email in Cloud now: `state` is "none", "person" (an existing account would become owner) or "synthetic" (refused); `id` is the person's user id. Throws when unreadable. */
+export function readOwner(remote, email) {
+  const rows = remote.select(`SELECT id, kind FROM users WHERE email = ${literal(email)};`);
+  if (rows.length === 0) return { state: "none" };
+  if (rows.length === 1 && (rows[0].kind === "person" || rows[0].kind === "synthetic") && typeof rows[0].id === "string" && PLAIN_ID.test(rows[0].id)) return { state: rows[0].kind, id: rows[0].id };
   throw new Error("unreadable");
 }
+
+/** What the owner email is in Cloud now: "none", "person" or "synthetic". Throws when unreadable. */
+export const readOwnerState = (remote, email) => readOwner(remote, email).state;
 
 export function runProvision({ dir, tenantId, ownerId, slug, prepared, reuseOwner = false }, { remote, log = console, target, now = () => new Date().toISOString(), random }) {
   const refuse = (why) => (log.error(`[provision] REFUSED: ${why}`), 1);
@@ -59,18 +63,21 @@ function provision({ dir, tenantId, ownerId, slug, prepared, reuseOwner }, { rem
   const current = readManifest(dir).tenant;
   if (current !== undefined) return refuse(current.state === "provisioning" ? `a previous provisioning did not finish (tenant=${current.id}). Run prod:undo-tenant for it (it must have no data), then try again.` : "this workdir already has a provisioned tenant.");
   const hostname = `${slug}.${target.vars.ROOT_DOMAIN}`.toLowerCase();
+  // The id of an existing account that becomes the owner. prod:undo-tenant must never delete it, so it is recorded with the tenant.
+  let reusedOwnerId;
   try {
     const rows = remote.select(`SELECT (SELECT COUNT(*) FROM tenants WHERE id = ${literal(tenantId)} OR slug = ${literal(slug)}) AS tenants, (SELECT COUNT(*) FROM tenant_domains WHERE hostname = ${literal(hostname)}) AS domains;`);
     if (rows.length !== 1 || rows[0].tenants !== 0 || rows[0].domains !== 0) return refuse("the slug, hostname or tenant id is already taken, or the target is unreadable.");
-    const owner = readOwnerState(remote, input.ownerEmail);
-    if (owner === "synthetic") return refuse("the owner email belongs to a system account.");
-    if ((owner === "person") !== reuseOwner) return refuse("the owner email state changed or does not match the typed phrase.");
+    const owner = readOwner(remote, input.ownerEmail);
+    if (owner.state === "synthetic") return refuse("the owner email belongs to a system account.");
+    if ((owner.state === "person") !== reuseOwner) return refuse("the owner email state changed or does not match the typed phrase.");
+    if (reuseOwner) reusedOwnerId = owner.id;
   } catch {
     return refuse("the target could not be read.");
   }
   let stage;
   try {
-    writeManifest(dir, { ...readManifest(dir), tenant: { id: tenantId, slug, state: "provisioning" } });
+    writeManifest(dir, { ...readManifest(dir), tenant: { id: tenantId, slug, state: "provisioning", ...(reusedOwnerId === undefined ? {} : { reusedOwnerId }) } });
     const { hash, address } = mintToken(target.vars.INBOUND_DOMAIN, random);
     stage = stageQr(dir, qr.bytes, qr.ext);
     remote.put({ tenantId, ext: qr.ext, contentType: qr.contentType, file: stage.file });
@@ -82,7 +89,7 @@ function provision({ dir, tenantId, ownerId, slug, prepared, reuseOwner }, { rem
     if (!ok) throw new Error("read-back mismatch");
     // The address is handed over only now: a failed run never leaves a dead inbound address behind.
     const handover = writeHandover(dir, address);
-    writeManifest(dir, { ...readManifest(dir), tenant: { id: tenantId, slug, state: "provisioned" } });
+    writeManifest(dir, { ...readManifest(dir), tenant: { id: tenantId, slug, state: "provisioned", ...(reusedOwnerId === undefined ? {} : { reusedOwnerId }) } });
     log.log(`[provision] tenant=${tenantId} slug=${slug} provisioned. The inbound address is in ${handover} (mode 0600). Next: pilot:import:plan <workdir>.`);
     return 0;
   } catch {
