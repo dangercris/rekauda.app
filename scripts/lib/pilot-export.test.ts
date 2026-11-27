@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, mkdtempSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -35,9 +35,10 @@ function setup(files: Record<string, string> = { "wrangler.jsonc": JSON.stringif
   const calls: Call[] = [];
   const out: string[] = [];
   const asked: string[] = [];
-  const state = { stdout: stdoutOf(ROWS), status: 0, typed: EXPORT_PHRASE as string | undefined };
+  const state: { stdout: string; status: number; typed: string | undefined; onSpawn?: () => void } = { stdout: stdoutOf(ROWS), status: 0, typed: EXPORT_PHRASE };
   const spawn = (bin: string, argv: string[], options: any) => {
     calls.push({ bin, argv, cwd: options.cwd, env: options.env, options });
+    state.onSpawn?.();
     return { status: state.status, stdout: state.stdout, stderr: "secret stderr row Ana Demo" };
   };
   const log = { error: (m: string) => out.push(String(m)), warn: (m: string) => out.push(String(m)), log: (m: string) => out.push(String(m)) };
@@ -62,7 +63,10 @@ describe("pilot:export: what it runs", () => {
     expect(run()).toBe(0);
     expect(calls).toHaveLength(1);
     const [call] = calls;
-    expect(call!.argv).toEqual(["d1", "execute", "fixture-pilot-db", "--remote", "--json", "--command", SELECT_BATCH]);
+    const configPath = join(call!.cwd, "pilot-d1.jsonc");
+    expect(call!.argv).toEqual(["d1", "execute", "fixture-pilot-db", "--remote", "--json", "--config", configPath, "--command", SELECT_BATCH]);
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({ account_id: ACCOUNT, d1_databases: [{ binding: "DB", database_name: "fixture-pilot-db", database_id: "11111111-aaaa-bbbb-cccc-222222222222" }] });
     expect(call!.bin).toBe("fake-wrangler");
     expect(call!.cwd).toBe(join(tmp, workdirs(tmp)[0]!));
     expect(call!.cwd.startsWith(root)).toBe(false);
@@ -140,6 +144,29 @@ describe("pilot:export: what it writes and prints", () => {
   });
 });
 
+describe("pilot:export: failure handling and warnings", () => {
+  it("reports the original failure generically and a generic cleanup line when the cleanup itself fails", () => {
+    const { tmp, out, state, run } = setup();
+    state.status = 1;
+    // Break the workdir from inside the spawn (group access), so that the cleanup refuses it.
+    state.onSpawn = () => workdirs(tmp).forEach((n) => chmodSync(join(tmp, n), 0o755));
+    expect(run()).toBe(1);
+    const text = out.join("\n");
+    expect(text).toMatch(/FAILED: nothing was exported/);
+    expect(text).toMatch(/could not remove the workdir.*pilot:cleanup/);
+    expect(text).not.toMatch(/Ana Demo|secret stderr|fixture-pilot|EACCES|ENOENT/);
+    for (const n of workdirs(tmp)) chmodSync(join(tmp, n), 0o700);
+  });
+
+  it("warns once to use a read-only D1 token, without showing the token", () => {
+    const { out, run } = setup();
+    run();
+    const text = out.join("\n");
+    expect(text).toMatch(/read-only D1 API token/);
+    expect(text).not.toContain("tok-secret-1");
+  });
+});
+
 describe("pilot:export: repeat runs prove the freeze", () => {
   it("prints MATCH and exits 0 when the content is equal, whatever the key order and the meta", () => {
     const { tmp, out, state, run } = setup();
@@ -151,7 +178,7 @@ describe("pilot:export: repeat runs prove the freeze", () => {
     expect(run(dir)).toBe(0);
     expect(out.join("\n")).toMatch(/\bMATCH\b/);
     const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
-    expect(manifest.exports.map((e: any) => e.matchesPrevious)).toEqual([null, true]);
+    expect(manifest.exports.map((e: any) => e.matchesFirst)).toEqual([null, true]);
   });
 
   it("prints MISMATCH and exits non-zero when one amount differs, without printing the rows", () => {
@@ -163,7 +190,32 @@ describe("pilot:export: repeat runs prove the freeze", () => {
     expect(run(dir)).toBe(3);
     expect(out.join("\n")).toMatch(/\bMISMATCH\b/);
     expect(out.join("\n")).not.toMatch(/1501|Ana Demo/);
-    expect(JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")).exports.at(-1).matchesPrevious).toBe(false);
+    expect(JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")).exports.at(-1).matchesFirst).toBe(false);
+  });
+
+  it("keeps reporting MISMATCH after one (H1, H2, H2): a repeat of the changed content never launders it", () => {
+    const { tmp, out, state, run } = setup();
+    run();
+    const dir = join(tmp, workdirs(tmp)[0]!);
+    const changed = stdoutOf({ ...ROWS, payments: [{ ...ROWS.payments[0]!, amount_cents: 1501 }] });
+    state.stdout = changed;
+    expect(run(dir)).toBe(3);
+    out.length = 0;
+    expect(run(dir)).toBe(3);
+    expect(out.join("\n")).toMatch(/\bMISMATCH\b/);
+    const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
+    expect(manifest.mismatchSeen).toBe(true);
+    expect(manifest.exports.map((e: any) => e.matchesFirst)).toEqual([null, false, false]);
+  });
+
+  it("stays MISMATCH even if the content later returns to the first hash (H1, H2, H1)", () => {
+    const { tmp, state, run } = setup();
+    run();
+    const dir = join(tmp, workdirs(tmp)[0]!);
+    state.stdout = stdoutOf({ ...ROWS, payments: [{ ...ROWS.payments[0]!, amount_cents: 1501 }] });
+    run(dir);
+    state.stdout = stdoutOf(ROWS);
+    expect(run(dir)).toBe(3);
   });
 
   it("refuses a directory that is not a marked workdir without spawning", () => {

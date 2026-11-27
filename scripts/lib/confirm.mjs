@@ -13,5 +13,10 @@ function readStdinLine() {
 export function confirmTyped(phrase, { isTTY = process.stdin.isTTY, readLine = readStdinLine, write = (m) => process.stderr.write(m) } = {}) {
   if (!isTTY) return false;
   write(`Type exactly "${phrase}" and press Enter to continue: `);
-  return readLine() === phrase;
+  try {
+    return readLine() === phrase;
+  } catch {
+    // EAGAIN on a non-blocking stdin, EIO, a closed descriptor: all of them are a refusal, never a crash or a pass.
+    return false;
+  }
 }

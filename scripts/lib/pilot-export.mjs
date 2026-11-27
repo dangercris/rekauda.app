@@ -1,10 +1,11 @@
 // pilot:export and pilot:cleanup. The export is the ONLY code that reads the pilot, and it can only read: one fixed batch
-// of SELECT statements, run as a fixed argv with no wrangler config file (cwd is the private workdir), a scrubbed env and
-// the account id of the pilot reference. Nothing passes through from the command line, and the output goes to a file in
+// of SELECT statements, run as a fixed argv with a scrubbed env and a generated config that holds only the pilot D1 entry
+// and the account id (0600, in the private workdir). The config is passed explicitly with --config, so wrangler never
+// searches parent directories for one, and the database is pinned by id as well as by name. Nothing passes through from the command line, and the output goes to a file in
 // the 0700 workdir, never to the terminal. It prints only counts, a content hash and MATCH or MISMATCH.
 // The pilot database name and account id come from the gitignored local reference and are never printed. No dependencies.
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { hash as digest } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,10 +22,11 @@ export const SELECT_BATCH = EXPORT_STATEMENTS.join(" ");
 const ENV_KEYS = ["PATH", "HOME", "TMPDIR", "CLOUDFLARE_API_TOKEN", "NODE_ENV"];
 const MAX_OUTPUT = 512 * 1024 * 1024;
 const MISMATCH_STATUS = 3;
+const GENERATED_CONFIG = "pilot-d1.jsonc";
 
 /** The one and only remote command line of the pilot export. */
-function buildExportArgv(dbName) {
-  return ["d1", "execute", dbName, "--remote", "--json", "--command", SELECT_BATCH];
+function buildExportArgv(dbName, configPath) {
+  return ["d1", "execute", dbName, "--remote", "--json", "--config", configPath, "--command", SELECT_BATCH];
 }
 
 const childEnv = (env, accountId) => ({ ...Object.fromEntries(ENV_KEYS.filter((key) => env[key] !== undefined).map((key) => [key, env[key]])), CLOUDFLARE_ACCOUNT_ID: accountId });
@@ -35,7 +37,7 @@ function canonical(value) {
   if (value !== null && typeof value === "object") return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
   return JSON.stringify(value);
 }
-export const canonicalHash = (tables) => createHash("sha256").update(canonical(tables)).digest("hex");
+export const canonicalHash = (tables) => digest("sha256", canonical(tables), "hex");
 
 /** Turns the wrangler JSON (one entry per statement) into { table: rows }. Throws on any unexpected shape. */
 function parseTables(stdout) {
@@ -48,6 +50,9 @@ function parseTables(stdout) {
   });
   return tables;
 }
+
+/** The only config the export uses: the pilot D1 entry and the account id, nothing else (no routes, no vars). */
+const generatedConfig = (ref) => JSON.stringify({ account_id: ref.accountId, d1_databases: [{ binding: "DB", database_name: ref.dbName, database_id: ref.dbId }] });
 
 /** Args: at most one positional (an existing workdir). Flags are never accepted. */
 export function runPilotExport(args, { root, bin, spawn = spawnSync, log = console, env = process.env, confirm = (phrase) => confirmTyped(phrase), tmp = tmpdir(), now = () => new Date().toISOString() }) {
@@ -73,6 +78,7 @@ export function runPilotExport(args, { root, bin, spawn = spawnSync, log = conso
       return 1;
     }
   }
+  log.warn("[pilot-export] Use a read-only D1 API token for this step. The tool cannot verify the token's permissions.");
   if (!confirm(EXPORT_PHRASE)) {
     log.error("[pilot-export] REFUSED: needs the typed confirmation phrase on a terminal.");
     return 1;
@@ -83,27 +89,39 @@ export function runPilotExport(args, { root, bin, spawn = spawnSync, log = conso
     dir = existing ? existing.dir : createWorkdir({ root, tmp, now });
     fresh = !existing;
     const manifest = existing ? existing.manifest : openWorkdir(dir, { root, tmp }).manifest;
-    const result = spawn(bin, buildExportArgv(ref.dbName), { cwd: dir, env: childEnv(env, ref.accountId), stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", maxBuffer: MAX_OUTPUT });
+    writeFileSync(join(dir, GENERATED_CONFIG), generatedConfig(ref), { mode: 0o600 });
+    const result = spawn(bin, buildExportArgv(ref.dbName, join(dir, GENERATED_CONFIG)), { cwd: dir, env: childEnv(env, ref.accountId), stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", maxBuffer: MAX_OUTPUT });
     if (result.error || result.status !== 0) throw new Error("wrangler failed");
     const tables = parseTables(String(result.stdout));
     const number = manifest.exports.length + 1;
     const file = `export-${number}.json`;
     const hash = canonicalHash(tables);
-    const previous = manifest.exports.at(-1);
+    const first = manifest.exports[0];
     const counts = Object.fromEntries(EXPORT_TABLES.map((t) => [t, tables[t].length]));
     writeFileSync(join(dir, file), JSON.stringify({ version: 1, tables }), { mode: 0o600 });
-    manifest.exports.push({ file, hash, counts, at: now(), matchesPrevious: previous ? previous.hash === hash : null });
+    // The FIRST export is the reference, and one difference is remembered for good: repeating the changed content
+    // (or going back to the first hash) can never turn a MISMATCH into a MATCH.
+    const matchesFirst = first ? first.hash === hash : null;
+    if (matchesFirst === false) manifest.mismatchSeen = true;
+    manifest.exports.push({ file, hash, counts, at: now(), matchesFirst });
     writeManifest(dir, manifest);
     log.log(`[pilot-export] workdir=${dir}`);
     log.log(`[pilot-export] ${file} ${EXPORT_TABLES.map((t) => `${t}=${counts[t]}`).join(" ")} hash=${hash}`);
-    if (!previous) return 0;
-    log.log(`[pilot-export] vs previous export: ${previous.hash === hash ? "MATCH" : "MISMATCH"}`);
-    if (previous.hash === hash) return 0;
+    if (!first) return 0;
+    const mismatch = manifest.mismatchSeen === true;
+    log.log(`[pilot-export] vs first export: ${mismatch ? "MISMATCH" : "MATCH"}`);
+    if (!mismatch) return 0;
     log.error("[pilot-export] The pilot changed between exports. Do not import this data.");
     return MISMATCH_STATUS;
   } catch {
-    if (fresh && dir) cleanupWorkdir(dir, { root, tmp });
     log.error("[pilot-export] FAILED: nothing was exported (no output is shown on purpose).");
+    if (fresh && dir) {
+      try {
+        cleanupWorkdir(dir, { root, tmp });
+      } catch {
+        log.error("[pilot-export] could not remove the workdir; run pilot:cleanup on the rekauda-pilot-* directory in the OS tmp dir.");
+      }
+    }
     return 1;
   }
 }

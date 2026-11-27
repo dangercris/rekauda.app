@@ -18,6 +18,10 @@ const EXPORT_FILE = "lib/pilot-export.mjs";
 const MENTIONS_REMOTE_FLAG = ["cloud-guard.mjs", ...WRAPPER_FILES, EXPORT_FILE];
 const INVOKES_WRANGLER = /bin\/wrangler|\bwrangler\s+(d1|dev|deploy|r2|secret|types|versions|kv|delete)\b/;
 
+// Every way of starting a process. Only the wrapper and the pilot export may do it (a lookbehind skips RegExp#exec).
+const SPAWNS = /(?<![.\w])(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\(/;
+const MAY_SPAWN = [...WRAPPER_FILES, EXPORT_FILE];
+
 describe("scripts/ safety scan", () => {
   it("finds the scripts to scan", () => {
     expect(sources.map((s) => s.name)).toEqual(expect.arrayContaining(["cloud-wrangler.mjs", "lib/cloud-wrangler-core.mjs", "pending.sh", "review.sh"]));
@@ -25,6 +29,11 @@ describe("scripts/ safety scan", () => {
 
   it.each(sources)("$name never uses --remote outside the guard and the wrapper", ({ name, text }) => {
     if (!MENTIONS_REMOTE_FLAG.includes(name)) expect(text).not.toContain("--remote");
+  });
+
+  it.each(sources)("$name starts no process unless it is the wrapper or the pilot export", ({ name, text }) => {
+    const code = text.split("\n").filter((l) => !l.trimStart().startsWith("//")).join("\n");
+    if (!MAY_SPAWN.includes(name)) expect(SPAWNS.test(code)).toBe(false);
   });
 
   it.each(sources)("$name invokes wrangler only through cloud-wrangler.mjs", ({ name, text }) => {
@@ -91,6 +100,8 @@ describe("the pilot export path (read-only)", () => {
 
   it("builds the remote argv in one place, the fixed argv builder, with the fixed batch and nothing passed through", () => {
     expect(builderFrom).toBeGreaterThan(-1);
+    expect(code.filter((l) => l.includes('"--config"'))).toHaveLength(1);
+    expect(builder).toContain('"--config"');
     expect(code.filter((l) => l.includes("--remote"))).toHaveLength(1);
     expect(builder).toContain('"--remote"');
     expect(builder).toContain("SELECT_BATCH");
@@ -101,11 +112,15 @@ describe("the pilot export path (read-only)", () => {
     const spawns = code.filter((l) => /\bspawn\(/.test(l));
     expect(spawns).toHaveLength(1);
     expect(spawns[0]).toContain("buildExportArgv(");
+    // The config is the generated one inside the workdir, which stops wrangler from searching parent directories.
+    expect(spawns[0]).toMatch(/buildExportArgv\([^)]*join\(dir, [A-Z_]*CONFIG[A-Z_]*\)/);
+    expect(spawns[0]).not.toMatch(/shell\s*:/);
+    expect(code.join("\n")).not.toMatch(/\bshell\s*:/);
   });
 
   it("contains no write, schema or pragma statement and no other wrangler family", () => {
-    expect(code.join("\n")).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/);
-    expect(code.join("\n")).not.toMatch(/"(r2|secret|deploy|delete|kv|versions|migrations|--file|--config|--local)"/);
+    expect(code.join("\n")).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE|VACUUM)\b/i);
+    expect(code.join("\n")).not.toMatch(/"(r2|secret|deploy|delete|kv|versions|migrations|--file|--local)"/);
   });
 });
 
