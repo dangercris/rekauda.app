@@ -1,6 +1,6 @@
 // The Deuna QR image of a tenant: read from a local file, checked by its magic bytes (png, jpg, webp) and a 1 MB limit, then
 // staged as a private copy named deuna-qr.<ext> that the fixed upload reads. Every problem is one generic error. No dependencies.
-import { closeSync, chmodSync, lstatSync, mkdtempSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, constants, fstatSync, mkdtempSync, openSync, readSync, realpathSync, rmSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
 export const MAX_QR_BYTES = 1024 * 1024;
@@ -15,15 +15,30 @@ function extensionOf(bytes) {
   return undefined;
 }
 
-/** Returns { bytes, ext, contentType } for a plain file (not a symlink) of 1 to 1 MB with image magic bytes, or throws `invalid QR image`. */
+/**
+ * Returns { bytes, ext, contentType } for a plain file of 1 to 1 MB with image magic bytes, or throws `invalid QR image`. No symlink anywhere in
+ * the path (the real path must equal the given one) and the file is opened with O_NOFOLLOW and read from that same descriptor.
+ */
 export function readQr(path) {
   try {
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.size < 1 || stat.size > MAX_QR_BYTES) throw new Error("x");
-    const bytes = readFileSync(path);
-    const ext = bytes.length <= MAX_QR_BYTES ? extensionOf(bytes) : undefined;
-    if (!ext) throw new Error("x");
-    return { bytes, ext, contentType: QR_TYPES[ext] };
+    if (realpathSync(path) !== path) throw new Error("x");
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const stat = fstatSync(fd);
+      const size = stat.size;
+      if (!stat.isFile() || size < 1 || size > MAX_QR_BYTES) throw new Error("x");
+      const bytes = Buffer.alloc(size);
+      for (let read = 0; read < size; ) {
+        const n = readSync(fd, bytes, read, size - read, null);
+        if (n === 0) throw new Error("x");
+        read += n;
+      }
+      const ext = extensionOf(bytes);
+      if (!ext) throw new Error("x");
+      return { bytes, ext, contentType: QR_TYPES[ext] };
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     throw new Error("invalid QR image");
   }
