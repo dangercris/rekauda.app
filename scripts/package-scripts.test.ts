@@ -56,6 +56,26 @@ describe("sandbox:* scripts", () => {
   });
 });
 
+const prodNames = Object.keys(scripts).filter((name) => name.startsWith("prod:"));
+
+describe("prod:* scripts", () => {
+  it("defines the expected production scripts", () => {
+    expect(prodNames.sort()).toEqual(["prod:deploy", "prod:guard", "prod:migrate", "prod:status", "prod:switch-apex"]);
+  });
+
+  it("prod:guard runs the production guard", () => {
+    expect(scripts["prod:guard"]).toBe("node scripts/cloud-guard.mjs --production");
+  });
+
+  it.each(["migrate", "deploy", "switch-apex", "status"])("prod:%s goes through the wrapper subcommand of the same name, with no flags", (name) => {
+    expect(scripts[`prod:${name}`]).toBe(`node scripts/cloud-wrangler.mjs prod:${name}`);
+  });
+
+  it("never auto-creates the production config", () => {
+    for (const name of prodNames) expect(scripts[name]).not.toContain("ensure-config");
+  });
+});
+
 describe("every script in package.json", () => {
   it.each(Object.entries(scripts))("%s never reaches remote or invokes wrangler outside the wrapper", (name, command) => {
     expect(command).not.toContain("--remote");

@@ -22,7 +22,12 @@
     "sandbox:migrate": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs sandbox:migrate",
     "sandbox:seed": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs sandbox:seed",
     "sandbox:deploy": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs sandbox:deploy",
-    "sandbox:status": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs sandbox:status"
+    "sandbox:status": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs sandbox:status",
+    "prod:guard": "node scripts/cloud-guard.mjs --production",
+    "prod:migrate": "node scripts/cloud-wrangler.mjs prod:migrate",
+    "prod:deploy": "node scripts/cloud-wrangler.mjs prod:deploy",
+    "prod:switch-apex": "node scripts/cloud-wrangler.mjs prod:switch-apex",
+    "prod:status": "node scripts/cloud-wrangler.mjs prod:status"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^8.0.0",

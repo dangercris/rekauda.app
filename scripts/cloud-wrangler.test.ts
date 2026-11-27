@@ -363,3 +363,144 @@ describe("cloud-wrangler: duplicate keys in wrangler.sandbox.jsonc", () => {
     expect(calls).toEqual([]);
   });
 });
+
+// Production: the second remote family. Fixture values are invented; the config comes from the committed example.
+const PROD_DB_ID = "55555555-aaaa-bbbb-cccc-444444444444";
+const PROD_CONFIG = ["--config", "wrangler.production.jsonc"];
+const PROD_ROOT = "colegio-demo.example.test";
+const APEX_ROUTES = [{ pattern: `*.${PROD_ROOT}/*`, zone_name: PROD_ROOT }, { pattern: `${PROD_ROOT}/*`, zone_name: PROD_ROOT }];
+const prodConfig = (patch: Record<string, unknown> = {}): string => {
+  const example = parseJsonc(readFileSync(new URL("../wrangler.production.example.jsonc", import.meta.url), "utf8"));
+  const ratelimits = example.ratelimits.map((r: any, i: number) => ({ ...r, namespace_id: String(7001 + i) }));
+  return JSON.stringify({ ...example, d1_databases: [{ ...example.d1_databases[0], database_id: PROD_DB_ID }], ratelimits, ...patch });
+};
+const prodSetup = (files: Record<string, string> = {}) => setup({ "wrangler.production.jsonc": prodConfig(), ".pilot-resources.json": JSON.stringify({ workers: ["fixture-pilot-worker"], d1Ids: ["11111111-aaaa-bbbb-cccc-222222222222"], buckets: ["fixture-pilot-bucket"], ratelimitIds: ["4242"] }), ...files });
+const PROD_PHRASES: Record<string, string> = { "prod:migrate": "MIGRATE PRODUCTION", "prod:deploy": "DEPLOY PRODUCTION", "prod:switch-apex": "SWITCH APEX" };
+
+/** Same as setup().run but with an injected confirmation, an env and a recording log. */
+function prodRun(root: string, calls: Call[], sub: string, { typed, env = {}, tty = true, args = [] as string[] }: { typed?: string; env?: Record<string, string>; tty?: boolean; args?: string[] } = {}) {
+  const errors: string[] = [];
+  const asked: string[] = [];
+  const spawn = (bin: string, argv: string[], options: { cwd: string; env?: Record<string, string> }) => {
+    calls.push({ bin, argv, cwd: options.cwd, ...(options.env ? { env: options.env } : {}) } as Call);
+    return { status: 0 };
+  };
+  const confirm = (phrase: string) => {
+    asked.push(phrase);
+    return tty && typed === phrase;
+  };
+  const log = { error: (m: string) => errors.push(String(m)), warn: () => undefined };
+  const status = runCloudWrangler([sub, ...args], { root: root + "/", bin: "w", viteBin: "v", spawn, log, env, confirm }) as number;
+  return { status, errors, asked };
+}
+
+describe("cloud-wrangler: production subcommands", () => {
+  it.each([
+    ["prod:migrate", [["d1", "migrations", "apply", "DB", "--remote", ...PROD_CONFIG]]],
+    ["prod:status", [["deployments", "list", ...PROD_CONFIG]]],
+    ["prod:deploy", [["build"], ["deploy", ...PROD_CONFIG]]],
+  ])("%s runs the exact argv after the typed phrase", (sub, argvs) => {
+    const { root, calls } = prodSetup();
+    const { status, asked } = prodRun(root, calls, sub, { typed: PROD_PHRASES[sub] });
+    expect(status).toBe(0);
+    expect(calls.map((c) => c.argv)).toEqual(argvs);
+    expect(asked).toEqual(sub === "prod:status" ? [] : [PROD_PHRASES[sub]]);
+  });
+
+  it("prod:switch-apex deploys only when the apex entry is present and the phrase is typed", () => {
+    const { root, calls } = prodSetup({ "wrangler.production.jsonc": prodConfig({ routes: APEX_ROUTES }) });
+    expect(prodRun(root, calls, "prod:switch-apex", { typed: "SWITCH APEX" }).status).toBe(0);
+    expect(calls.map((c) => c.argv)).toEqual([["build"], ["deploy", ...PROD_CONFIG]]);
+  });
+
+  it("prod:deploy refuses a config that covers the apex, before asking", () => {
+    const { root, calls } = prodSetup({ "wrangler.production.jsonc": prodConfig({ routes: APEX_ROUTES }) });
+    const { status, errors, asked } = prodRun(root, calls, "prod:deploy", { typed: "DEPLOY PRODUCTION" });
+    expect([status, calls, asked]).toEqual([1, [], []]);
+    expect(errors.join("\n")).toContain("REFUSED routes");
+  });
+
+  it("prod:switch-apex refuses a wrong phrase, no TTY, and a config without the apex entry", () => {
+    const withApex = prodSetup({ "wrangler.production.jsonc": prodConfig({ routes: APEX_ROUTES }) });
+    expect(prodRun(withApex.root, withApex.calls, "prod:switch-apex", { typed: "switch apex" }).status).toBe(1);
+    expect(prodRun(withApex.root, withApex.calls, "prod:switch-apex", { typed: "SWITCH APEX", tty: false }).status).toBe(1);
+    const plain = prodSetup();
+    expect(prodRun(plain.root, plain.calls, "prod:switch-apex", { typed: "SWITCH APEX" }).status).toBe(1);
+    expect([withApex.calls, plain.calls]).toEqual([[], []]);
+  });
+
+  it.each(["prod:migrate", "prod:deploy"])("%s spawns nothing without the exact phrase or a TTY", (sub) => {
+    for (const opts of [{}, { typed: "yes" }, { typed: PROD_PHRASES[sub], tty: false }]) {
+      const { root, calls } = prodSetup();
+      expect(prodRun(root, calls, sub, opts).status).toBe(1);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it.each(["prod:migrate", "prod:deploy", "prod:switch-apex", "prod:status"])("%s rejects passthrough flags and extra arguments", (sub) => {
+    for (const args of [["--remote"], ["--config", "wrangler.jsonc"], ["-c", "x"], ["--name", "other"], ["--env", "prod"], ["extra"]]) {
+      const { root, calls } = prodSetup();
+      expect(prodRun(root, calls, sub, { typed: PROD_PHRASES[sub], args }).status, args.join(" ")).toBe(1);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it.each(["secret", "delete", "prod:secret", "prod:delete", "prod:rollback-apex", "prod:d1"])("refuses the arbitrary subcommand %s", (sub) => {
+    const { root, calls } = prodSetup();
+    expect(prodRun(root, calls, sub, { typed: "x" }).status).toBe(1);
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses a pilot id, a missing config and a duplicated key without spawning", () => {
+    const shared = prodSetup({ ".pilot-resources.json": JSON.stringify({ workers: ["w"], d1Ids: [PROD_DB_ID], buckets: ["b"], ratelimitIds: ["4242"] }) });
+    const refused = prodRun(shared.root, shared.calls, "prod:status");
+    expect(refused.status).toBe(1);
+    expect(refused.errors.join("")).not.toContain(PROD_DB_ID);
+    const missing = setup({ ".pilot-resources.json": "{}" });
+    expect(() => prodRun(missing.root, missing.calls, "prod:status")).toThrow();
+    const dup = prodSetup({ "wrangler.production.jsonc": prodConfig().replace(/^\{/, '{ "name": "rekauda-cloud-evil", ') });
+    expect(() => prodRun(dup.root, dup.calls, "prod:status")).toThrow();
+    expect([shared.calls, missing.calls, dup.calls]).toEqual([[], [], []]);
+  });
+
+  it("scrubs the spawn env before every production step", () => {
+    const { root, calls } = prodSetup();
+    const env = { PATH: "/bin", HOME: "/h", CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ENV: "x", WRANGLER_LOG: "debug", FOO: "bar" };
+    prodRun(root, calls, "prod:deploy", { typed: "DEPLOY PRODUCTION", env });
+    expect(calls).toHaveLength(2);
+    for (const c of calls) expect((c as any).env).toEqual({ PATH: "/bin", HOME: "/h", CLOUDFLARE_API_TOKEN: "t" });
+  });
+
+  it("rechecks before every spawn: a config change between steps is refused", () => {
+    const { root, calls } = prodSetup();
+    const spawn = (bin: string, argv: string[]) => {
+      calls.push({ bin, argv, cwd: root });
+      writeFileSync(join(root, "wrangler.production.jsonc"), prodConfig({ routes: APEX_ROUTES }));
+      return { status: 0 };
+    };
+    const errors: string[] = [];
+    const log = { error: (m: string) => errors.push(String(m)), warn: () => undefined };
+    const status = runCloudWrangler(["prod:deploy"], { root: root + "/", bin: "w", viteBin: "v", spawn, log, env: {}, confirm: () => true });
+    expect(status).toBe(1);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("prints no token, id or account in its output", () => {
+    const { root, calls } = prodSetup();
+    const out = prodRun(root, calls, "prod:deploy", { typed: "DEPLOY PRODUCTION", env: { CLOUDFLARE_API_TOKEN: "tok-secret-1" } });
+    expect(out.errors.join("\n")).not.toMatch(/tok-secret-1|55555555/);
+  });
+});
+
+describe("confirmTyped", () => {
+  it("accepts only the exact phrase on a TTY and never prints the phrase typed", async () => {
+    // @ts-expect-error plain .mjs module without types
+    const { confirmTyped } = await import("./lib/confirm.mjs");
+    const out: string[] = [];
+    const base = { write: (m: string) => out.push(m) };
+    expect(confirmTyped("GO", { ...base, isTTY: true, readLine: () => "GO" })).toBe(true);
+    expect(confirmTyped("GO", { ...base, isTTY: true, readLine: () => "go" })).toBe(false);
+    expect(confirmTyped("GO", { ...base, isTTY: false, readLine: () => "GO" })).toBe(false);
+    expect(out.join("")).not.toContain("go\n");
+  });
+});
