@@ -4,6 +4,13 @@ import { join } from "node:path";
 
 const repo = new URL("../../", import.meta.url).pathname;
 
+/** The zero-import TS source the guard loads directly (Node type stripping), so a copied scripts/ dir still runs. */
+export function copyGuardSources(root: string): void {
+  const file = "src/worker/apex/legacy-redirects.ts";
+  mkdirSync(join(root, file, ".."), { recursive: true });
+  cpSync(repo + file, join(root, file));
+}
+
 /**
  * Builds a throwaway checkout (scripts plus the committed examples) so tests never read or write the real
  * repo files, including a developer's local wrangler.jsonc or .pilot-resources.json.
@@ -12,6 +19,7 @@ export function fakeCheckout(base: string, files: Record<string, string> = {}): 
   const root = mkdtempSync(join(tmpdir(), `${base}-`));
   cpSync(repo + "scripts", join(root, "scripts"), { recursive: true, filter: (src) => !src.endsWith(".test.ts") });
   for (const file of ["rekauda.config.example.ts", "wrangler.example.jsonc", "wrangler.cloud.example.jsonc", "wrangler.sandbox.example.jsonc"]) cpSync(repo + file, join(root, file));
+  copyGuardSources(root);
   for (const [name, content] of Object.entries(files)) {
     mkdirSync(join(root, name, ".."), { recursive: true });
     writeFileSync(join(root, name), content);

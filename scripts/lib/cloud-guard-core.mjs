@@ -2,6 +2,9 @@
 // This tracked file holds NO pilot identifiers. The pilot's names, ids and domains come only from the local,
 // gitignored wrangler.jsonc and the optional gitignored .pilot-resources.json, and are never printed.
 // Values that also appear in the pilot example file are placeholders, not pilot data.
+// The one import is the zero-import LEGACY_REDIRECTS parser shared with the Worker (Node type stripping).
+
+import { legacyRedirectsValid } from "../../src/worker/apex/legacy-redirects.ts";
 
 const REQUIRED_MIGRATIONS_DIR = "migrations-cloud";
 const MODES = ["local", "remote"];
@@ -306,15 +309,6 @@ const canonId = (value) => {
 };
 const limiterIds = (config, extraList) => [...asArray(config?.ratelimits).map((r) => r?.namespace_id), ...asArray(extraList)].filter((v) => typeof v === "string" || typeof v === "number").map(canonId);
 const isProdName = (value) => isPrefixedName(value, PRODUCTION_NAME_PREFIX);
-
-/** Legacy map: at most 20 entries, key /r/<slug>, value https://<slug>.<root>/r/<same slug>. Same rules as the Worker's parser (S7). */
-function legacyRedirectsValid(map, root) {
-  if (!isObject(map) || Object.keys(map).length > 20) return false;
-  return Object.entries(map).every(([key, value]) => {
-    const slug = /^\/r\/([a-z0-9-]{1,48})$/.exec(key)?.[1];
-    return slug !== undefined && value === `https://${slug}.${root}/r/${slug}`;
-  });
-}
 
 /** Routes must be exactly the wildcard, plus one apex entry (route or custom domain) depending on the command's apex policy. */
 function checkProductionRoutes(target, root, apex, refuse) {

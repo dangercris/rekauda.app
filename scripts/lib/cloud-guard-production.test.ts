@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseJsonc } from "./jsonc.mjs";
 // @ts-expect-error plain .mjs module without types
 import { checkProductionConfig } from "./cloud-guard-core.mjs";
+import { legacyRedirectsValid, parseLegacyRedirects } from "../../src/worker/apex/legacy-redirects";
 
 // Invented fixtures only. `pilot` stands in for the local pilot wrangler.jsonc; `sandboxCfg` for wrangler.sandbox.jsonc.
 const PILOT_ACCOUNT = "acct-fixture-0001";
@@ -205,5 +206,29 @@ describe("checkProductionConfig: apex state per command", () => {
   it("refuses two apex entries and an unknown apex policy", () => {
     expect(run(prod({ routes: [WILDCARD, APEX_ROUTE, forms[1]] }), { apex: "any" }).ok).toBe(false);
     expect(run(prod(), { apex: "maybe" }).ok).toBe(false);
+  });
+});
+
+// The guard and the Worker use ONE parser (src/worker/apex/legacy-redirects.ts): what the guard accepts, the Worker serves.
+describe("LEGACY_REDIRECTS parity between the guard and the Worker parser", () => {
+  const ok = { "/r/curso-demo": `https://curso-demo.${ROOT}/r/curso-demo` };
+  it.each([
+    ["valid", ok],
+    ["empty", {}],
+    ["other host", { "/r/curso-demo": "https://evil.example.test/r/curso-demo" }],
+    ["protocol-relative", { "/r/curso-demo": `//curso-demo.${ROOT}/r/curso-demo` }],
+    ["http", { "/r/curso-demo": `http://curso-demo.${ROOT}/r/curso-demo` }],
+    ["different slug", { "/r/curso-demo": `https://otro.${ROOT}/r/curso-demo` }],
+    ["encoded slash", { "/r/curso%2fdemo": `https://curso%2fdemo.${ROOT}/r/curso%2fdemo` }],
+    ["trailing slash key", { "/r/curso-demo/": `https://curso-demo.${ROOT}/r/curso-demo` }],
+    ["uppercase key", { "/r/Curso-Demo": `https://curso-demo.${ROOT}/r/curso-demo` }],
+    ["array", [ok]],
+    ["string", "x"],
+    ["null", null],
+  ])("%s: the guard refuses exactly when the parser refuses", (_label, map) => {
+    const guardRefuses = fields(run(withVars({ LEGACY_REDIRECTS: map }))).includes("vars.LEGACY_REDIRECTS");
+    expect(guardRefuses).toBe(!legacyRedirectsValid(map, ROOT));
+    if (guardRefuses) expect(parseLegacyRedirects(map, ROOT)).toEqual({});
+    else expect(parseLegacyRedirects(map, ROOT)).toEqual(map);
   });
 });

@@ -122,6 +122,8 @@ describe("multi mode tenant resolution", () => {
     const bodies = new Set<string>();
     for (const host of ["nobody.localhost", "admin.localhost", "localhost", "www.localhost", "a.b.localhost", "demo-b.localhost", "evil.example"]) {
       for (const path of ["/api/collections", "/", "/admin", "/r/demo-collection"]) {
+        // The apex root is the static landing (apex mode, below); every other apex path stays the generic 404.
+        if (path === "/" && (host === "localhost" || host === "www.localhost")) continue;
         const res = await get(env, host, path);
         expect(res.status).toBe(404);
         bodies.add(await res.text());
@@ -255,6 +257,73 @@ describe("admin in multi mode", () => {
       ec,
     );
     expect(res.status).toBe(403);
+  });
+});
+
+describe("apex mode (multi)", () => {
+  const LEGACY = { "/r/curso-demo": "https://curso-demo.localhost/r/curso-demo" };
+  const withMap = (env: CloudEnv, map: unknown): CloudEnv => ({ ...env, LEGACY_REDIRECTS: map }) as unknown as CloudEnv;
+  const landingCsp = "default-src 'none'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+
+  it.each(["localhost", "www.localhost", "localhost:8799"])("302s the legacy path on %s with no-store and the query kept, without touching D1 or the limiter", async (host) => {
+    const { env, lookups, limiterKeys, assetCalls } = setup("multi");
+    const res = await get(withMap(env, LEGACY), host, "/r/curso-demo?x=1");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://curso-demo.localhost/r/curso-demo?x=1");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect([lookups, limiterKeys, assetCalls]).toEqual([[], [], []]);
+  });
+
+  it("serves the landing with its own CSP, apart from the app pages, with and without the map", async () => {
+    const { env } = setup("multi");
+    for (const e of [env, withMap(env, LEGACY)]) {
+      const res = await get(e, "localhost", "/");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-security-policy")).toBe(landingCsp);
+      expect(await res.text()).toContain("Rekauda");
+    }
+  });
+
+  it("answers 404 for the legacy path when the map is absent or empty, and for POST and other apex paths", async () => {
+    const { env } = setup("multi");
+    expect((await get(env, "localhost", "/r/curso-demo")).status).toBe(404);
+    expect((await get(withMap(env, {}), "localhost", "/r/curso-demo")).status).toBe(404);
+    const mapped = withMap(env, LEGACY);
+    const post = await worker.fetch(new Request("https://localhost/r/curso-demo", { method: "POST", headers: { "cf-connecting-ip": "203.0.113.1" } }), mapped, ec);
+    expect(post.status).toBe(404);
+    for (const path of ["/r/curso-demo/", "/r/otro", "/admin", "/api/collections", "/assets/app.js"]) expect((await get(mapped, "localhost", path)).status, path).toBe(404);
+  });
+
+  it("a malformed or open-redirect map fails closed to 404 and the log never echoes it", async () => {
+    const { env } = setup("multi");
+    const evil = { "/r/curso-demo": "https://evil.example.test/r/curso-demo" };
+    const res = await get(withMap(env, evil), "localhost", "/r/curso-demo");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+    const logged = vi.mocked(console.error).mock.calls.flat().join(" ");
+    expect(logged).toContain("legacy redirects");
+    expect(logged).not.toContain("evil");
+  });
+
+  it("leaves tenant subdomains unchanged: no redirect, no landing", async () => {
+    const { env } = setup("multi");
+    const mapped = withMap(env, LEGACY);
+    const home = await get(mapped, "demo-a.localhost", "/");
+    expect(home.headers.get("content-security-policy") ?? "").not.toBe(landingCsp);
+    const page = await get(mapped, "demo-a.localhost", "/r/curso-demo");
+    expect(page.status).not.toBe(302);
+    expect(page.headers.get("location")).toBeNull();
+    expect((await get(mapped, "demo-a.localhost", "/api/collections")).status).toBe(200);
+    expect((await get(mapped, "admin.localhost", "/")).status).toBe(404);
+  });
+
+  it("single mode never gets an apex: the map and the landing are ignored", async () => {
+    const { env } = setup("single");
+    const single = { ...env, ROOT_DOMAIN: "self.example.test", LEGACY_REDIRECTS: { "/r/curso-demo": "https://curso-demo.self.example.test/r/curso-demo" } } as unknown as CloudEnv;
+    const res = await get(single, "self.example.test", "/r/curso-demo");
+    expect(res.headers.get("location")).toBeNull();
+    const root = await get(single, "self.example.test", "/");
+    expect(root.headers.get("content-security-policy") ?? "").not.toBe(landingCsp);
   });
 });
 

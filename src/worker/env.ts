@@ -25,6 +25,8 @@ export interface MultiEnv extends BaseEnv {
   INBOUND_DOMAIN: string;
   MAIL_ARCHIVE: R2Bucket;
   SEND_EMAIL: SendEmail;
+  /** Deploy-time map of legacy apex paths to tenant URLs (see apex/legacy-redirects.ts). Unknown on purpose: it is validated, never trusted. */
+  LEGACY_REDIRECTS?: unknown;
 }
 
 export interface SingleEnv extends BaseEnv {
