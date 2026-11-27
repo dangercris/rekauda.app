@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { isRelativeKey } from "../../../src/worker/storage/keys";
 import { TENANT_ID, makeTables } from "./pilot-fixture";
 // @ts-expect-error plain .mjs module without types
 import { canonicalDigest } from "./canonical.mjs";
@@ -33,6 +35,13 @@ describe("transform", () => {
     expect(p1.receipt_sha256).toBe("ab".repeat(32));
     expect(p1.receipt_size).toBe(1234);
     expect(p1.receipt_type).toBe("image/jpeg");
+  });
+
+  it("produces receipt keys the Worker accepts once the tenant prefix is removed", () => {
+    for (const p of run().payments) {
+      expect(p.receipt_key.startsWith(`t/${TENANT_ID}/`)).toBe(true);
+      expect(isRelativeKey(p.receipt_key.slice(`t/${TENANT_ID}/`.length))).toBe(true);
+    }
   });
 
   it("copies reviewed_by verbatim, including null", () => {
@@ -79,6 +88,17 @@ describe("canonicalDigest", () => {
     const altered = rows().map((r: any, i: number) => (i === 0 ? { ...r, amount_cents: r.amount_cents + 1 } : r));
     expect(canonicalDigest("payments", altered)).not.toBe(canonicalDigest("payments", rows()));
     expect(canonicalDigest("payments", [...rows()].reverse())).not.toBe(canonicalDigest("payments", rows()));
+  });
+
+  it("throws when a column is missing instead of hashing a null", () => {
+    const { amount_cents: _drop, ...partial } = rows()[0];
+    expect(() => canonicalDigest("payments", [partial])).toThrow();
+  });
+
+  it("includes the table name in the hash input", () => {
+    const columns = Object.keys(run().students[0]).filter((c) => c !== "tenant_id");
+    const expected = createHash("sha256").update(JSON.stringify(["students", run().students.map((r: any) => columns.map((c) => r[c]))])).digest("hex");
+    expect(canonicalDigest("students", run().students)).toBe(expected);
   });
 
   it("ignores the student id, so regenerated ids still match", () => {

@@ -78,6 +78,31 @@ describe("pilot:import:plan", () => {
     }
   });
 
+  it("leaves no plan file after a refused run that follows a successful one, and no temp files after success", () => {
+    const { dir, run } = setup();
+    expect(run(dir, TENANT_ID)).toBe(0);
+    expect(readdirSync(dir).filter((f) => f.includes("import"))).toEqual(["import.sql"]);
+    writeManifest(dir, { ...readManifest(dir), mismatchSeen: true });
+    expect(run(dir, TENANT_ID)).toBe(1);
+    expect(readdirSync(dir)).not.toContain("import.sql");
+    expect(readdirSync(dir).some((f) => f.includes("tmp"))).toBe(false);
+  });
+
+  it("removes a stale plan file when the preflight fails", () => {
+    const { dir, run } = setup();
+    expect(run(dir, TENANT_ID)).toBe(0);
+    const bad = makeTables();
+    bad.payments[0]!.collection_id = "ghost";
+    const file = join(dir, "export-2.json");
+    writeFileSync(file, JSON.stringify({ version: 1, tables: bad }));
+    const manifest = readManifest(dir);
+    manifest.exports[1].hash = canonicalHash(bad);
+    manifest.exports[0].hash = manifest.exports[1].hash;
+    writeManifest(dir, manifest);
+    expect(run(dir, TENANT_ID)).toBe(1);
+    expect(readdirSync(dir)).not.toContain("import.sql");
+  });
+
   it("refuses a mismatch seen earlier even if the last export matches", () => {
     const { dir, run } = setup(undefined, (m) => { m.mismatchSeen = true; });
     expect(run(dir, TENANT_ID)).toBe(1);
