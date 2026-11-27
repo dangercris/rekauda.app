@@ -174,6 +174,7 @@ wrangler r2 bucket delete rekauda-sandbox-files --config wrangler.sandbox.jsonc
 
 - Herramienta de alta y rotación del token de entrada (`inbound_token`).
 - Asistente de registro de cursos (fase 2) y cobro (fase 3).
-- Plan de importación de los datos del piloto (tenant `pilot_import`, `r2_prefix=''`).
+- Importación de los datos del piloto: construida (`pilot:export`, `pilot:import:plan`, `prod:*`). Las sondas P0.* y los pasos manuales de la migración están en [MIGRACION-PILOTO.md](MIGRACION-PILOTO.md). Siguen sin verificar hasta que el dueño las ejecute: la precedencia de la ruta sobre el dominio personalizado, el alcance del catch-all de Email Routing y si `d1 execute --file` es atómico.
+- Herramienta para borrar el objeto del QR de un tenant (hoy es manual, ver la sección 5 del runbook).
 - Comparar más dígitos de la cuenta destino en el analizador congelado (hoy son los últimos 4).
 - `testTimeout` de Vitest bajo carga (pruebas pesadas cerca de 5 s).

@@ -216,3 +216,7 @@ Los eventos nunca incluyen nombres, teléfonos, códigos de seguimiento ni monto
 | No aparece el QR | Falta el archivo `public/deuna-qr.png` (no está en git) o `treasury.qrUrl` apunta a otro archivo, o está en `null` |
 | La vista previa de WhatsApp está desactualizada | Ver "Compartir el enlace" |
 | El correo de Deuna no se asigna | Ver [CORREO-DEUNA.md](CORREO-DEUNA.md#solución-de-problemas) |
+
+## Migrar un curso del piloto a Cloud
+
+Para pasar el curso del piloto a un tenant de Cloud (exportar, importar, validar, cambiar el dominio raíz y retirar el piloto) sigue el runbook [MIGRACION-PILOTO.md](MIGRACION-PILOTO.md). Si algo sale mal, la sección "Recuperación" de ese documento explica cómo deshacer.

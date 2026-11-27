@@ -21,6 +21,7 @@ import { runImportPlan } from "./import/plan.mjs";
 import { SLUG, UUID } from "./import/target.mjs";
 import { runUndo } from "./import/undo.mjs";
 import { runValidate } from "./import/validate.mjs";
+import { runDemoWorkdir } from "./demo-workdir.mjs";
 import { runPilotCleanup, runPilotExport } from "./pilot-export.mjs";
 import { openWorkdir } from "./private-workdir.mjs";
 import { matchProvisionInsert } from "./provision/insert-guard.mjs";
@@ -280,6 +281,8 @@ export function runCloudWrangler(args, { root, bin = root + "node_modules/.bin/w
   // The read-only pilot export lives in its own module, with its own fixed argv (see lib/pilot-export.mjs).
   if (subcommand === "pilot:export") return runPilotExport(rest, { root, bin, spawn, log, env, confirm });
   if (subcommand === "pilot:cleanup") return runPilotCleanup(rest, { root, log });
+  // The rehearsal workdir: invented exports, local only, no wrangler (see lib/demo-workdir.mjs).
+  if (subcommand === "pilot:demo-workdir") return runDemoWorkdir(rest, { root, log, tmp });
   // The import plan is local only: no wrangler, no network (see lib/import/plan.mjs).
   if (subcommand === "pilot:import:plan") return runImportPlan(rest, { root, log });
   if (Object.hasOwn(DATA_COMMANDS, subcommand)) return runProductionData(subcommand, rest, { root, bin, spawn, log, env, confirm, tmp, now });
