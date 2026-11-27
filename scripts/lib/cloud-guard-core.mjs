@@ -144,7 +144,7 @@ const SANDBOX_MAIN = "src/worker/index.ts";
 const SANDBOX_ROOT = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.workers\.dev$/;
 const WORKER_SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const PILOT_FILE_KEYS = ["names", "ids", "domains", "workers", "d1Ids", "buckets", "ratelimitIds"];
+const PILOT_FILE_KEYS = ["names", "ids", "domains", "workers", "d1Ids", "buckets", "ratelimitIds", "productionRoot"];
 
 /** Top-level keys a sandbox config may have. Everything else (services, queues, routes, env, triggers, build...) is refused. */
 const SANDBOX_TOP_KEYS = ["$schema", "name", "main", "compatibility_date", "compatibility_flags", "workers_dev", "preview_urls", "account_id", "assets", "images", "rules", "d1_databases", "r2_buckets", "ratelimits", "vars", "observability"];
@@ -178,11 +178,13 @@ function sandboxPilot(pilot, pilotExample, extra, withRatelimits = false) {
       ex = extra;
       for (const [key, value] of Object.entries(extra)) {
         if (!PILOT_FILE_KEYS.includes(key)) problems.push("the pilot reference file has an unknown key");
-        else if (!Array.isArray(value) || value.some((v) => typeof v !== "string" && typeof v !== "number")) problems.push("the pilot reference file has a malformed list");
+        else if (key === "productionRoot") {
+          if (typeof value !== "string") problems.push("the pilot reference file has a malformed productionRoot");
+        } else if (!Array.isArray(value) || value.some((v) => typeof v !== "string" && typeof v !== "number")) problems.push("the pilot reference file has a malformed list");
       }
     }
   }
-  const list = (key) => (Array.isArray(ex[key]) ? ex[key].filter((v) => typeof v === "string" || typeof v === "number").map(norm) : []);
+  const list = (key) => (key !== "productionRoot" && Array.isArray(ex[key]) ? ex[key].filter((v) => typeof v === "string" || typeof v === "number").map(norm) : []);
   const p = isObject(pilot) ? pilot : {};
   const example = extractResources(pilotExample);
   const realName = (v) => typeof v === "string" && norm(v) !== "" && !isPlaceholder(v) && !example.values.includes(norm(v));
@@ -270,6 +272,13 @@ const PRODUCTION_TOP_KEYS = [...SANDBOX_TOP_KEYS, "routes", "send_email", "trigg
 const PRODUCTION_VARS = ["TENANCY", "ROOT_DOMAIN", "INBOUND_DOMAIN", "LEGACY_REDIRECTS"];
 const APEX_POLICIES = ["forbid", "require", "any"];
 const DNS_NAME = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/;
+const normRoot = (value) => norm(value).replace(/\.$/, "");
+/** Numeric spellings collide ("04242", "+4242", "4242.0" all become "4242"); anything else compares normalized. */
+const canonId = (value) => {
+  const text = norm(value);
+  return text !== "" && Number.isFinite(Number(text)) ? String(Number(text)) : text;
+};
+const limiterIds = (config, extraList) => [...asArray(config?.ratelimits).map((r) => r?.namespace_id), ...asArray(extraList)].filter((v) => typeof v === "string" || typeof v === "number").map(canonId);
 const isProdName = (value) => isPrefixedName(value, PRODUCTION_NAME_PREFIX);
 
 /** Legacy map: at most 20 entries, key /r/<slug>, value https://<slug>.<root>/r/<same slug>. Same rules as the Worker's parser (S7). */
@@ -309,13 +318,19 @@ export function checkProductionConfig({ target, targetFile, pilot, pilotExample,
   if (missing.length > 0) refuse("pilot", `pilot data incomplete, missing: ${missing.join(", ")} (see wrangler.sandbox.example.jsonc)`);
   deepScan(target, [], known, violations, ["account_id"]);
 
-  const sandboxValues = new Set(extractResources(isObject(sandbox) ? { ...sandbox, account_id: undefined } : {}).values);
+  const sandboxValues = new Set(extractResources(isObject(sandbox) ? { ...sandbox, account_id: undefined } : {}).values.filter((v) => !isPlaceholder(v)));
+  const sandboxHex = new Set([...sandboxValues].map(hexForm).filter(Boolean));
+  const sandboxHas = (value) => sandboxValues.has(value) || ((hexForm(value) ?? "") !== "" && sandboxHex.has(hexForm(value)));
   const sandboxScan = [];
-  deepScan(target, [], { values: sandboxValues }, sandboxScan, ["account_id"]);
+  deepScan(target, [], { values: { has: sandboxHas } }, sandboxScan, ["account_id"]);
   for (const { field } of sandboxScan) refuse(field, "value matches a sandbox resource");
 
   for (const key of Object.keys(target)) if (!PRODUCTION_TOP_KEYS.includes(key)) refuse(key, "key not allowed in a production config");
   if (target.main !== SANDBOX_MAIN) refuse("main", `must be ${SANDBOX_MAIN}`);
+  for (const [key, allowed] of Object.entries(SANDBOX_ENTRY_KEYS)) {
+    if (key in target && (!isObject(target[key]) || Object.keys(target[key]).some((k) => !allowed.includes(k)))) refuse(key, "unknown or malformed settings");
+  }
+  if ("assets" in target && target.assets?.directory !== "./dist") refuse("assets.directory", 'must be "./dist"');
   if (target.workers_dev !== false) refuse("workers_dev", "must be false");
   if (target.preview_urls !== false) refuse("preview_urls", "must be false");
   if (!isProdName(target.name)) refuse("name", `must start with ${PRODUCTION_NAME_PREFIX} and be a valid slug`);
@@ -323,6 +338,12 @@ export function checkProductionConfig({ target, targetFile, pilot, pilotExample,
   const vars = isObject(target.vars) ? target.vars : {};
   for (const key of Object.keys(vars)) if (!PRODUCTION_VARS.includes(key)) refuse(`vars.${key}`, "var not allowed in production");
   const root = typeof vars.ROOT_DOMAIN === "string" ? vars.ROOT_DOMAIN : "";
+  const extra = isObject(extraDenylist) ? extraDenylist : {};
+  const pinned = typeof extra.productionRoot === "string" ? normRoot(extra.productionRoot) : "";
+  if (pinned === "") refuse("pilot", "productionRoot missing from the pilot reference file (see wrangler.sandbox.example.jsonc)");
+  else if (normRoot(root) !== pinned) refuse("vars.ROOT_DOMAIN", "must equal productionRoot from the pilot reference file");
+  const pilotDomains = [...extractResources(isObject(pilot) ? pilot : {}).domains, ...asArray(extra.domains).filter((d) => typeof d === "string")].map(normRoot);
+  if (root !== "" && normRoot(root) !== pinned && pilotDomains.includes(normRoot(root))) refuse("vars.ROOT_DOMAIN", "is a pilot domain other than productionRoot");
   if (vars.TENANCY !== "multi") refuse("vars.TENANCY", 'must be "multi"');
   if (!DNS_NAME.test(root) || root.endsWith(".workers.dev")) refuse("vars.ROOT_DOMAIN", "must be a DNS name and not workers.dev");
   if (vars.INBOUND_DOMAIN !== `in.${root}`) refuse("vars.INBOUND_DOMAIN", 'must be "in." + ROOT_DOMAIN');
@@ -339,10 +360,12 @@ export function checkProductionConfig({ target, targetFile, pilot, pilotExample,
   if (databases.length !== 1 || databases[0]?.binding !== "DB") refuse("d1_databases", 'must be exactly one database bound as "DB"');
   checkDatabases(target, violations);
   if (databases.some((db) => !isProdName(db?.database_name))) refuse("d1_databases.database_name", `must start with ${PRODUCTION_NAME_PREFIX}`);
-  if (databases.some((db) => typeof db?.database_id !== "string" || isPlaceholder(db.database_id))) refuse("d1_databases.database_id", "placeholder id: not allowed for remote");
+  if (databases.some((db) => typeof db?.database_id !== "string" || isPlaceholder(db.database_id) || !UUID.test(norm(db.database_id)))) refuse("d1_databases.database_id", "must be a real UUID (no placeholder)");
   if (buckets.map((b) => b?.binding).sort().join() !== "MAIL_ARCHIVE,RECEIPTS") refuse("r2_buckets", "must be exactly RECEIPTS and MAIL_ARCHIVE");
   if (buckets.some((b) => !isProdName(b?.bucket_name))) refuse("r2_buckets.bucket_name", `must start with ${PRODUCTION_NAME_PREFIX}`);
   if (limiters.length !== 3) refuse("ratelimits", "must be exactly 3 ratelimits");
-  if (limiters.some((r) => (typeof r?.namespace_id !== "string" && typeof r?.namespace_id !== "number") || isPlaceholder(r.namespace_id))) refuse("ratelimits.namespace_id", "placeholder id: not allowed for remote");
+  if (limiters.some((r) => typeof r?.namespace_id !== "string" || !/^[1-9][0-9]*$/.test(r.namespace_id))) refuse("ratelimits.namespace_id", "must be a plain positive integer string without leading zero");
+  const taken = new Set([...limiterIds(pilot, extra.ratelimitIds), ...limiterIds(sandbox)]);
+  if (limiters.some((r) => taken.has(canonId(r?.namespace_id ?? "")))) refuse("ratelimits.namespace_id", "value matches a pilot or sandbox resource");
   return { ok: violations.length === 0, violations, warnings: [] };
 }

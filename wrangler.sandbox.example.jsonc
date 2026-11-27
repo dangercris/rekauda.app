@@ -9,7 +9,8 @@
   // wrangler.jsonc (name, d1_databases[].database_id, r2_buckets[].bucket_name) and/or from .pilot-resources.json, whose
   // lists are classified by key. Shape, with invented values (any other key or a wrong type is refused):
   //   { "workers": ["pilot-worker"], "d1Ids": ["11111111-2222-3333-4444-555555555555"], "buckets": ["pilot-bucket"],
-  //     "ratelimitIds": ["1001"], "names": ["any other pilot name"], "ids": ["any other pilot id"], "domains": ["pilot.example.org"] }
+  //     "ratelimitIds": ["1001"], "productionRoot": "example.test", "names": ["any other pilot name"], "ids": ["any other pilot id"], "domains": ["pilot.example.org"] }
+  // "productionRoot" is required by production mode only: the one ROOT_DOMAIN it accepts (any other pilot domain is refused).
   // Flat "names" cannot be classified, so they count only for comparison. A UUID in "ids" counts as a D1 id.
   // Only these top-level keys are accepted (allowlist): name, main, compatibility_date, compatibility_flags, workers_dev,
   // preview_urls, account_id, assets, images, rules, d1_databases, r2_buckets, ratelimits, vars, observability.

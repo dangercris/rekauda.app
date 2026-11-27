@@ -22,6 +22,7 @@ const sandboxCfg = {
   r2_buckets: [{ bucket_name: "rekauda-sandbox-files" }],
   ratelimits: [{ name: "LOGIN_LIMITER", namespace_id: "3002" }],
 };
+const REF = { productionRoot: "colegio-demo.example.test" };
 const pilotExample = { name: "example-name", d1_databases: [{ database_name: "example-db", database_id: "00000000-0000-0000-0000-000000000000" }] };
 const ROOT = "colegio-demo.example.test";
 const WILDCARD = { pattern: `*.${ROOT}/*`, zone_name: ROOT };
@@ -59,7 +60,7 @@ const run = (target: unknown, extra: Extra = {}) =>
     pilot: "pilot" in extra ? extra.pilot : pilot,
     pilotExample,
     sandbox: sandboxCfg,
-    extraDenylist: extra.extraDenylist,
+    extraDenylist: "extraDenylist" in extra ? extra.extraDenylist : REF,
     apex: extra.apex ?? "forbid",
   });
 const fields = (r: { violations: { field: string }[] }) => r.violations.map((v) => v.field);
@@ -68,7 +69,7 @@ describe("checkProductionConfig: allowed", () => {
   it("accepts a valid production fixture", () => expect(run(prod())).toEqual({ ok: true, violations: [], warnings: [] }));
 
   it("accepts real pilot data that comes only from .pilot-resources.json", () => {
-    const extra = { workers: ["fixture-pilot"], d1Ids: [PILOT_DB_ID], buckets: ["fixture-pilot-bucket"], ratelimitIds: ["4242"] };
+    const extra = { workers: ["fixture-pilot"], d1Ids: [PILOT_DB_ID], buckets: ["fixture-pilot-bucket"], ratelimitIds: ["4242"], ...REF };
     expect(run(prod(), { pilot: null, extraDenylist: extra }).ok).toBe(true);
   });
 
@@ -131,13 +132,48 @@ describe("checkProductionConfig: refused one violation at a time", () => {
   ])("refuses %s", (_label, extra) => expect(fields(run(prod(), extra))).toContain("config"));
 
   it.each([
-    ["worker name", { d1Ids: [PILOT_DB_ID], buckets: ["fixture-pilot-bucket"], ratelimitIds: ["4242"] }, "worker name"],
-    ["D1 id", { workers: ["fixture-pilot"], buckets: ["fixture-pilot-bucket"], ratelimitIds: ["4242"] }, "D1 id"],
-    ["R2 bucket", { workers: ["fixture-pilot"], d1Ids: [PILOT_DB_ID], ratelimitIds: ["4242"] }, "R2 bucket"],
-    ["ratelimit id", { workers: ["fixture-pilot"], d1Ids: [PILOT_DB_ID], buckets: ["fixture-pilot-bucket"] }, "ratelimit id"],
+    ["worker name", { d1Ids: [PILOT_DB_ID], buckets: ["fixture-pilot-bucket"], ratelimitIds: ["4242"], ...REF }, "worker name"],
+    ["D1 id", { workers: ["fixture-pilot"], buckets: ["fixture-pilot-bucket"], ratelimitIds: ["4242"], ...REF }, "D1 id"],
+    ["R2 bucket", { workers: ["fixture-pilot"], d1Ids: [PILOT_DB_ID], ratelimitIds: ["4242"], ...REF }, "R2 bucket"],
+    ["ratelimit id", { workers: ["fixture-pilot"], d1Ids: [PILOT_DB_ID], buckets: ["fixture-pilot-bucket"], ...REF }, "ratelimit id"],
   ])("fails closed when pilot knowledge lacks the %s", (_label, extra, missing) => {
     const result = run(prod(), { pilot: null, extraDenylist: extra });
     expect(result.violations.find((v: any) => v.field === "pilot")?.reason).toContain(missing);
+  });
+
+  it.each([
+    ["a root other than productionRoot", () => withVars({ ROOT_DOMAIN: "other-zone.example.test", INBOUND_DOMAIN: "in.other-zone.example.test" }), undefined],
+    ["a missing productionRoot", () => prod(), {}],
+    ["a non-string productionRoot", () => prod(), { productionRoot: 7 }],
+    ["a pilot domain listed in domains", () => withVars({ ROOT_DOMAIN: "pilot-site.example.test", INBOUND_DOMAIN: "in.pilot-site.example.test" }), { ...REF, domains: ["Pilot-Site.example.test."] }],
+  ])("refuses %s", (_label, build, extraDenylist) => {
+    const result = run(build(), extraDenylist === undefined ? {} : { extraDenylist });
+    expect(result.ok).toBe(false);
+    expect(fields(result).some((f: string) => f === "pilot" || f === "vars.ROOT_DOMAIN")).toBe(true);
+  });
+
+  it("pins the root after lower-casing and trimming a trailing dot", () => {
+    expect(run(prod(), { extraDenylist: { productionRoot: "COLEGIO-DEMO.example.test." } }).ok).toBe(true);
+  });
+
+  it.each([
+    ["unknown assets key", () => prod({ assets: { directory: "./dist", extra: 1 } }), "assets"],
+    ["assets directory", () => prod({ assets: { directory: "./other" } }), "assets.directory"],
+    ["unknown images key", () => prod({ images: { binding: "IMAGES", x: 1 } }), "images"],
+    ["unknown observability key", () => prod({ observability: { enabled: true, x: 1 } }), "observability"],
+    ["non-UUID D1 id", () => withD1({ database_id: "not-a-uuid" }), "d1_databases.database_id"],
+    ["leading-zero ratelimit id", () => limiter("04242"), "ratelimits.namespace_id"],
+    ["signed ratelimit id", () => limiter("+4242"), "ratelimits.namespace_id"],
+    ["decimal ratelimit id", () => limiter("4242.0"), "ratelimits.namespace_id"],
+  ])("strict shape: refuses %s", (_label, build, field) => expect(fields(run(build()))).toContain(field));
+
+  it("canonicalises ratelimit ids on the pilot side too", () => {
+    const ref = { ...REF, ratelimitIds: ["04242"] };
+    expect(fields(run(limiter("4242"), { pilot: null, extraDenylist: { workers: ["fixture-pilot"], d1Ids: [PILOT_DB_ID], buckets: ["fixture-pilot-bucket"], ...ref } }))).toContain("ratelimits.namespace_id");
+  });
+
+  it("compares sandbox ids in every hex spelling", () => {
+    expect(fields(run(withD1({ database_id: SANDBOX_DB_ID.toUpperCase().replaceAll("-", "") })))).toContain("d1_databases.database_id");
   });
 
   it("never prints an id, a name or a secret", () => {
