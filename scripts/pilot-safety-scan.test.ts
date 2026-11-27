@@ -31,6 +31,39 @@ describe("scripts/ safety scan", () => {
   });
 });
 
+describe("the only path to --remote", () => {
+  const wrapper = sources.find((s) => s.name === "lib/cloud-wrangler-core.mjs")!.text;
+  const start = wrapper.indexOf("function runSandbox");
+  const end = wrapper.indexOf("/** root ends with a slash");
+  const outsideSandbox = (wrapper.slice(0, start) + wrapper.slice(end)).split("\n");
+
+  it("lives in the sandbox function of the wrapper", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(wrapper.slice(start, end)).toContain('"--remote"');
+  });
+
+  it("outside that function, the wrapper mentions the flag only to reject it", () => {
+    for (const line of outsideSandbox.filter((l) => l.includes("--remote"))) {
+      expect(line.trimStart().startsWith("//") || line.includes("FORBIDDEN_LONG")).toBe(true);
+    }
+  });
+
+  it("the seed builder and the guard libraries never build a remote command", () => {
+    for (const name of ["lib/cloud-sandbox-seed.mjs", "lib/cloud-guard-core.mjs", "lib/cloud-guard-io.mjs"]) {
+      const text = sources.find((s) => s.name === name)!.text;
+      expect(text, name).not.toContain("--remote");
+      expect(INVOKES_WRANGLER.test(text), name).toBe(false);
+    }
+  });
+
+  it("every remote step of the sandbox function carries the fixed sandbox config", () => {
+    const body = wrapper.slice(start, end);
+    expect(body).toContain("SANDBOX_CONFIG");
+    for (const line of body.split("\n").filter((l) => l.includes('"--remote"'))) expect(line).toContain("SANDBOX_CONFIG");
+  });
+});
+
 describe("pilot ops shell scripts on this branch", () => {
   it.each(["pending.sh", "review.sh"])("%s refuses to run and exits 1", (name) => {
     const result = spawnSync("bash", [dir + name, "ABC-DEF", "recibido", "details"], { encoding: "utf8" });

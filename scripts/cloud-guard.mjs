@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Pilot safety guard CLI. Exits non-zero on any violation or error (fail closed).
-//   --local | --remote   mode (required; --remote is always refused in phase 1)
+//   --local | --remote   mode (required; --remote is always refused here: remote exists only through --sandbox)
 //   --config <path>      cloud config (default wrangler.cloud.jsonc)
+//   --sandbox            workers.dev sandbox check of wrangler.sandbox.jsonc (the only remote-capable check; no --config)
 //   --refuse-branch      used by pilot scripts on feat/cloud: always exits 1
 // Pilot data comes from the local wrangler.jsonc and .pilot-resources.json (see wrangler.cloud.example.jsonc).
 // Never prints ids, names or secrets. No dependencies.
 import { fileURLToPath } from "node:url";
-import { loadAndCheck, report } from "./lib/cloud-guard-io.mjs";
+import { loadAndCheck, loadAndCheckSandbox, report } from "./lib/cloud-guard-io.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -14,6 +15,16 @@ function run(args) {
   if (args.includes("--refuse-branch")) {
     console.error("[cloud-guard] REFUSED: this branch (feat/cloud) never touches pilot resources: pilot ops scripts run from main only (deploy the pilot from main).");
     return 1;
+  }
+  if (args.includes("--sandbox")) {
+    if (args.includes("--config") || args.includes("--local") || args.includes("--remote")) {
+      console.error("[cloud-guard] REFUSED: --sandbox always checks wrangler.sandbox.jsonc and takes no other mode or --config.");
+      return 1;
+    }
+    const { result } = loadAndCheckSandbox({ root });
+    report(result);
+    if (result.ok) console.log("[cloud-guard] OK (sandbox)");
+    return result.ok ? 0 : 1;
   }
   const mode = args.includes("--remote") ? "remote" : args.includes("--local") ? "local" : undefined;
   const configIndex = args.indexOf("--config");

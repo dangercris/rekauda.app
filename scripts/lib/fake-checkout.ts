@@ -11,7 +11,7 @@ const repo = new URL("../../", import.meta.url).pathname;
 export function fakeCheckout(base: string, files: Record<string, string> = {}): string {
   const root = mkdtempSync(join(tmpdir(), `${base}-`));
   cpSync(repo + "scripts", join(root, "scripts"), { recursive: true, filter: (src) => !src.endsWith(".test.ts") });
-  for (const file of ["rekauda.config.example.ts", "wrangler.example.jsonc", "wrangler.cloud.example.jsonc"]) cpSync(repo + file, join(root, file));
+  for (const file of ["rekauda.config.example.ts", "wrangler.example.jsonc", "wrangler.cloud.example.jsonc", "wrangler.sandbox.example.jsonc"]) cpSync(repo + file, join(root, file));
   for (const [name, content] of Object.entries(files)) {
     mkdirSync(join(root, name, ".."), { recursive: true });
     writeFileSync(join(root, name), content);

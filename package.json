@@ -17,7 +17,12 @@
     "cloud:migrate:local": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs d1 migrations apply DB",
     "cloud:seed:local": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs d1 execute DB --file scripts/cloud-seed.local.sql",
     "cloud:dev": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs dev --port 8799",
-    "cloud:types": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs types"
+    "cloud:types": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs types",
+    "sandbox:guard": "node scripts/ensure-config.mjs && node scripts/cloud-guard.mjs --sandbox",
+    "sandbox:migrate": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs sandbox:migrate",
+    "sandbox:seed": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs sandbox:seed",
+    "sandbox:deploy": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs sandbox:deploy",
+    "sandbox:status": "node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs sandbox:status"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^8.0.0",

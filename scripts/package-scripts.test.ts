@@ -36,6 +36,26 @@ describe("cloud:* scripts", () => {
   });
 });
 
+const sandboxNames = Object.keys(scripts).filter((name) => name.startsWith("sandbox:"));
+
+describe("sandbox:* scripts", () => {
+  it("defines the expected sandbox scripts", () => {
+    expect(sandboxNames.sort()).toEqual(["sandbox:deploy", "sandbox:guard", "sandbox:migrate", "sandbox:seed", "sandbox:status"]);
+  });
+
+  it("sandbox:guard runs the sandbox guard", () => {
+    expect(scripts["sandbox:guard"]).toBe("node scripts/ensure-config.mjs && node scripts/cloud-guard.mjs --sandbox");
+  });
+
+  it.each(["migrate", "seed", "deploy", "status"])("sandbox:%s ensures the config, then goes through the wrapper subcommand of the same name", (name) => {
+    expect(scripts[`sandbox:${name}`]).toBe(`node scripts/ensure-config.mjs && node scripts/cloud-wrangler.mjs sandbox:${name}`);
+  });
+
+  it.each(sandboxNames)("%s hardcodes no wrangler flags and never names the pilot scripts", (name) => {
+    expect(scripts[name]).not.toMatch(/--remote|--config|--env|--persist-to|--name|\bsecret\b|\bpnpm\b/);
+  });
+});
+
 describe("every script in package.json", () => {
   it.each(Object.entries(scripts))("%s never reaches remote or invokes wrangler outside the wrapper", (name, command) => {
     expect(command).not.toContain("--remote");

@@ -1,0 +1,89 @@
+{
+  // Rekauda Cloud SANDBOX on workers.dev, in the SAME Cloudflare account as the live pilot. Copy to wrangler.sandbox.jsonc
+  // (gitignored; scripts/ensure-config.mjs does it). Every sandbox script runs scripts/cloud-guard.mjs --sandbox first,
+  // which refuses the config unless ALL of these hold: file is wrangler.sandbox.jsonc, vars.SANDBOX = "true", TENANCY = "multi",
+  // workers_dev = true, no routes, ROOT_DOMAIN ends with .workers.dev, every Worker/D1/R2 name contains "sandbox", the D1 id is
+  // not a placeholder and NOTHING equals a pilot name or id (only account_id may equal the pilot's, same account).
+  // The guard learns the pilot's real data only from local gitignored files and refuses to run any remote command unless it
+  // knows ALL THREE categories: a worker name, a D1 database id (UUID) and an R2 bucket name. They come from the local pilot
+  // wrangler.jsonc (name, d1_databases[].database_id, r2_buckets[].bucket_name) and/or from .pilot-resources.json, whose
+  // lists are classified by key. Shape, with invented values (any other key or a wrong type is refused):
+  //   { "workers": ["pilot-worker"], "d1Ids": ["11111111-2222-3333-4444-555555555555"], "buckets": ["pilot-bucket"],
+  //     "ratelimitIds": ["1001"], "names": ["any other pilot name"], "ids": ["any other pilot id"], "domains": ["pilot.example.org"] }
+  // Flat "names" cannot be classified, so they count only for comparison. A UUID in "ids" counts as a D1 id.
+  // Only these top-level keys are accepted (allowlist): name, main, compatibility_date, compatibility_flags, workers_dev,
+  // preview_urls, account_id, assets, images, rules, d1_databases, r2_buckets, ratelimits, vars, observability.
+  // Exactly one D1 (binding DB) and one R2 bucket (binding RECEIPTS). Every name must start with "rekauda-sandbox-".
+  //
+  // Design: the SAME code is deployed as TWO Workers (vars.SANDBOX_WORKERS) that share ONE sandbox D1 and ONE sandbox R2
+  // bucket. workers.dev gives one hostname per Worker, <worker-name>.<account-subdomain>.workers.dev, so each hostname
+  // resolves as a platform subdomain tenant (slug = worker name). `pnpm sandbox:seed` creates those tenants.
+  //
+  // Manual steps (nothing here is created for you; see docs/CLOUD-SANDBOX-CHECKLIST.md):
+  //   1. Create the D1 and the bucket by hand, with names that contain "sandbox" and are NOT the pilot's:
+  //        wrangler whoami
+  //        wrangler d1 create rekauda-sandbox-db --config wrangler.sandbox.jsonc
+  //        wrangler r2 bucket create rekauda-sandbox-files --config wrangler.sandbox.jsonc
+  //      Answer "no" if wrangler offers to write the new binding into a config file. Names must start with "rekauda-sandbox-".
+  //   2. Fill account_id (optional, the same account as the pilot is allowed), the D1 database_name and database_id,
+  //      the bucket name, both Worker names, and ROOT_DOMAIN with your account's workers.dev subdomain.
+  //   3. pnpm sandbox:guard, then pnpm sandbox:migrate, pnpm sandbox:seed, pnpm sandbox:deploy.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+
+  // Worker A. Worker B is only named in vars.SANDBOX_WORKERS and deployed with `wrangler deploy --name <worker-b>`.
+  "name": "rekauda-sandbox-a",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-11-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+
+  // NO "routes" and NO "route": the guard refuses any of them. workers.dev only.
+
+  "vars": {
+    "SANDBOX": "true",
+    "TENANCY": "multi",
+    // <account-workers-subdomain>.workers.dev, e.g. example-sub.workers.dev (find it in the dashboard under Workers).
+    "ROOT_DOMAIN": "example-sub.workers.dev",
+    // Unused on workers.dev: there is no inbound email in this sandbox.
+    "INBOUND_DOMAIN": "in.example-sub.workers.dev",
+    // Every name contains "sandbox", is a valid tenant slug (a-z, 0-9, hyphen) and none is a pilot name. The config name must be listed.
+    "SANDBOX_WORKERS": ["rekauda-sandbox-a", "rekauda-sandbox-b"]
+  },
+
+  "rules": [{ "type": "Data", "globs": ["**/*.ttf"], "fallthrough": true }],
+
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "single-page-application",
+    // Same as the cloud config: the Worker answers every HTML entry so it can inline the tenant config (src/worker/boot.ts).
+    "run_worker_first": ["/*", "!/assets/*", "!/icon.svg"]
+  },
+
+  // Replace the name and the id with the ones printed by `wrangler d1 create`. The all-zero id is a placeholder and is refused.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rekauda-sandbox-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations-cloud"
+    }
+  ],
+
+  // Receipts only. No MAIL_ARCHIVE, no send_email and no cron: inbound mail and magic links need a separate domain.
+  "r2_buckets": [{ "binding": "RECEIPTS", "bucket_name": "rekauda-sandbox-files" }],
+
+  "images": { "binding": "IMAGES" },
+
+  // namespace_id values differ from wrangler.example.jsonc (1001-1003) and wrangler.cloud.example.jsonc (2001-2003) on
+  // purpose. They must also differ from the pilot's real ones: the guard checks.
+  "ratelimits": [
+    { "name": "SUBMIT_LIMITER", "namespace_id": "3001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "LOGIN_LIMITER", "namespace_id": "3002", "simple": { "limit": 5, "period": 60 } },
+    { "name": "LOOKUP_LIMITER", "namespace_id": "3003", "simple": { "limit": 20, "period": 60 } }
+  ],
+
+  "observability": { "enabled": true }
+}

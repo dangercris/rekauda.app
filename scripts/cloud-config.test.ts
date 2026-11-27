@@ -19,7 +19,7 @@ function ensureCheckout(name: string): string {
   const root = join(tmp, name);
   mkdirSync(join(root, "scripts"), { recursive: true });
   copyFileSync(repo + "scripts/ensure-config.mjs", join(root, "scripts/ensure-config.mjs"));
-  for (const file of ["rekauda.config.example.ts", "wrangler.example.jsonc", "wrangler.cloud.example.jsonc"]) copyFileSync(repo + file, join(root, file));
+  for (const file of ["rekauda.config.example.ts", "wrangler.example.jsonc", "wrangler.cloud.example.jsonc", "wrangler.sandbox.example.jsonc"]) copyFileSync(repo + file, join(root, file));
   return root;
 }
 const ensure = (root: string) => spawnSync(process.execPath, [join(root, "scripts/ensure-config.mjs")], { encoding: "utf8" });

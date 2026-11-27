@@ -7,7 +7,8 @@ const REQUIRED_MIGRATIONS_DIR = "migrations-cloud";
 const MODES = ["local", "remote"];
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
-const norm = (value) => String(value).trim().toLowerCase();
+// NFKC first: full-width and other compatibility spellings of a name compare equal to the plain one.
+const norm = (value) => String(value).normalize("NFKC").trim().toLowerCase();
 const isPlaceholder = (value) => /^[0-]*$/.test(norm(value)) || /^<.*>$/.test(norm(value));
 const normalizeDir = (dir) => norm(dir ?? "").replace(/^\.\//, "").replace(/\/+$/, "");
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -68,14 +69,18 @@ function knownPilot(pilot, example, extra) {
 
 const fieldPath = (path) => path.filter((key) => typeof key === "string").join(".");
 
-/** Walks the whole target: flags values equal to pilot data, `remote: true` and numeric namespace ids. */
-function deepScan(node, path, known, violations) {
+/**
+ * Walks the whole target: flags values equal to pilot data, `remote: true` and numeric namespace ids.
+ * `skipTopLevel` names top-level keys that are not scanned (sandbox mode: account_id only).
+ */
+function deepScan(node, path, known, violations, skipTopLevel = []) {
   if (typeof node === "string") {
     if (known.values.has(norm(node))) violations.push({ field: fieldPath(path), reason: "value matches a pilot resource" });
   } else if (Array.isArray(node)) {
     node.forEach((item, index) => deepScan(item, [...path, index], known, violations));
   } else if (isObject(node)) {
     for (const [key, value] of Object.entries(node)) {
+      if (path.length === 0 && skipTopLevel.includes(key)) continue;
       if (key === "remote" && value === true) violations.push({ field: "remote", reason: "remote bindings are not allowed in phase 1" });
       else if (key === "namespace_id" && typeof value === "number" && known.values.has(norm(value))) violations.push({ field: fieldPath([...path, key]), reason: "value matches a pilot resource" });
       else deepScan(value, [...path, key], known, violations);
@@ -131,4 +136,125 @@ export function checkCloudConfig({ target, pilot, pilotExample, mode, extraDenyl
   checkRoutes(target, known, violations);
   if (mode === "remote") checkRemote(target, hasPilot, violations);
   return { ok: violations.length === 0, violations, warnings };
+}
+
+const SANDBOX_CONFIG_FILE = "wrangler.sandbox.jsonc";
+export const SANDBOX_NAME_PREFIX = "rekauda-sandbox-";
+const SANDBOX_MAIN = "src/worker/index.ts";
+const SANDBOX_ROOT = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.workers\.dev$/;
+const WORKER_SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const PILOT_FILE_KEYS = ["names", "ids", "domains", "workers", "d1Ids", "buckets", "ratelimitIds"];
+
+/** Top-level keys a sandbox config may have. Everything else (services, queues, routes, env, triggers, build...) is refused. */
+const SANDBOX_TOP_KEYS = ["$schema", "name", "main", "compatibility_date", "compatibility_flags", "workers_dev", "preview_urls", "account_id", "assets", "images", "rules", "d1_databases", "r2_buckets", "ratelimits", "vars", "observability"];
+const SANDBOX_ENTRY_KEYS = {
+  assets: ["directory", "binding", "html_handling", "not_found_handling", "run_worker_first"],
+  images: ["binding"],
+  observability: ["enabled"],
+};
+const SANDBOX_LIST_KEYS = {
+  d1_databases: ["binding", "database_name", "database_id", "migrations_dir"],
+  r2_buckets: ["binding", "bucket_name"],
+  ratelimits: ["name", "namespace_id", "simple"],
+};
+
+const isSandboxName = (value) => typeof value === "string" && value.startsWith(SANDBOX_NAME_PREFIX) && value.length >= 3 && value.length <= 40 && WORKER_SLUG.test(value) && !value.includes("--") && !value.endsWith("-");
+
+/** 32 hex digits (UUID without hyphens or braces, account id), else null. */
+const hexForm = (value) => {
+  const bare = norm(value).replace(/^[{(]/, "").replace(/[})]$/, "").replaceAll("-", "");
+  return /^[0-9a-f]{32}$/.test(bare) ? bare : null;
+};
+
+/** Pilot knowledge for sandbox mode: everything to compare against, and the categories that must be known. */
+function sandboxPilot(pilot, pilotExample, extra) {
+  const problems = [];
+  let ex = {};
+  if (extra !== null && extra !== undefined) {
+    if (!isObject(extra)) problems.push("the pilot reference file is not an object");
+    else {
+      ex = extra;
+      for (const [key, value] of Object.entries(extra)) {
+        if (!PILOT_FILE_KEYS.includes(key)) problems.push("the pilot reference file has an unknown key");
+        else if (!Array.isArray(value) || value.some((v) => typeof v !== "string" && typeof v !== "number")) problems.push("the pilot reference file has a malformed list");
+      }
+    }
+  }
+  const list = (key) => (Array.isArray(ex[key]) ? ex[key].filter((v) => typeof v === "string" || typeof v === "number").map(norm) : []);
+  const p = isObject(pilot) ? pilot : {};
+  const example = extractResources(pilotExample);
+  const realName = (v) => typeof v === "string" && norm(v) !== "" && !isPlaceholder(v) && !example.values.includes(norm(v));
+  const realId = (v) => typeof v === "string" && UUID.test(norm(v)) && !isPlaceholder(v);
+  const names = (values) => new Set(values.filter(realName).map(norm));
+  const ids = (values) => new Set(values.filter(realId).map(norm));
+  const categories = {
+    "worker name": names([p.name, ...list("workers")]),
+    "D1 id": ids([...asArray(p.d1_databases).map((db) => db?.database_id), ...list("d1Ids"), ...list("ids")]),
+    "R2 bucket": names([...asArray(p.r2_buckets).map((b) => b?.bucket_name), ...list("buckets")]),
+  };
+  // Comparison set: every non-placeholder pilot value, example-equal ones included (an id never gets exempted for matching an example).
+  const everything = [...extractResources(p).values, ...list("names"), ...list("ids"), ...list("workers"), ...list("d1Ids"), ...list("buckets"), ...list("ratelimitIds"), ...Object.values(categories).flatMap((c) => [...c])];
+  const values = new Set(everything.map(norm).filter((v) => v !== "" && !isPlaceholder(v)));
+  const hex = new Set([...values].map(hexForm).filter(Boolean));
+  const has = (value) => values.has(value) || ((hexForm(value) ?? "") !== "" && hex.has(hexForm(value)));
+  const missing = Object.entries(categories).filter(([, set]) => set.size === 0).map(([label]) => label);
+  return { known: { values: { has }, domains: new Set() }, missing, problems };
+}
+
+function checkSandboxShape(target, refuse) {
+  for (const key of Object.keys(target)) if (!SANDBOX_TOP_KEYS.includes(key)) refuse(key, "key not allowed in a sandbox config");
+  if (target.main !== SANDBOX_MAIN) refuse("main", `must be ${SANDBOX_MAIN}`);
+  for (const [key, allowed] of Object.entries(SANDBOX_ENTRY_KEYS)) {
+    if (key in target && (!isObject(target[key]) || Object.keys(target[key]).some((k) => !allowed.includes(k)))) refuse(key, "unknown or malformed settings");
+  }
+  for (const [key, allowed] of Object.entries(SANDBOX_LIST_KEYS)) {
+    const entries = target[key];
+    if (Array.isArray(entries) && entries.some((e) => !isObject(e) || Object.keys(e).some((k) => !allowed.includes(k)))) refuse(key, "unknown keys in an entry");
+    if (key !== "ratelimits" && !(Array.isArray(entries) && entries.length === 1)) refuse(key, "must have exactly one entry");
+  }
+  if (asArray(target.d1_databases)[0]?.binding !== "DB") refuse("d1_databases.binding", 'must be "DB"');
+  if (asArray(target.r2_buckets)[0]?.binding !== "RECEIPTS") refuse("r2_buckets.binding", 'must be "RECEIPTS"');
+}
+
+/**
+ * Remote check for the workers.dev sandbox. Fails closed: every condition must hold. The pilot's account_id is the ONLY
+ * value allowed to equal the pilot's (same Cloudflare account); every other string is scanned against pilot data, in
+ * every spelling of an id. Pilot knowledge must cover a worker name, a D1 id and an R2 bucket.
+ * Returns { ok, violations: [{ field, reason }], warnings }. Output never contains ids, names or secrets.
+ */
+export function checkSandboxConfig({ target, targetFile, pilot, pilotExample, extraDenylist }) {
+  const violations = [];
+  const refuse = (field, reason) => violations.push({ field, reason });
+  if (targetFile !== SANDBOX_CONFIG_FILE) refuse("config", `sandbox mode only accepts ${SANDBOX_CONFIG_FILE}`);
+  if (!isObject(target)) return { ok: false, violations: [...violations, { field: "config", reason: "sandbox config missing or not an object" }], warnings: [] };
+
+  const { known, missing, problems } = sandboxPilot(pilot, pilotExample, extraDenylist);
+  for (const problem of problems) refuse("pilot", problem);
+  if (missing.length > 0) refuse("pilot", `pilot data incomplete, missing: ${missing.join(", ")} (see wrangler.sandbox.example.jsonc)`);
+
+  deepScan(target, [], known, violations, ["account_id"]);
+  checkSandboxShape(target, refuse);
+  if (target.workers_dev !== true) refuse("workers_dev", "must be true");
+
+  const vars = isObject(target.vars) ? target.vars : {};
+  if (vars.SANDBOX !== "true") refuse("vars.SANDBOX", 'must be the string "true"');
+  if (vars.TENANCY !== "multi") refuse("vars.TENANCY", 'must be "multi"');
+  if (typeof vars.ROOT_DOMAIN !== "string" || !SANDBOX_ROOT.test(vars.ROOT_DOMAIN)) refuse("vars.ROOT_DOMAIN", "must be <account-subdomain>.workers.dev");
+
+  const workers = vars.SANDBOX_WORKERS;
+  if (!Array.isArray(workers) || workers.length === 0 || workers.some((w) => typeof w !== "string")) refuse("vars.SANDBOX_WORKERS", "must be a non-empty list of worker names");
+  else {
+    if (!workers.includes(target.name)) refuse("vars.SANDBOX_WORKERS", "must include the config name");
+    if (new Set(workers).size !== workers.length) refuse("vars.SANDBOX_WORKERS", "must not repeat a name");
+    if (workers.some((w) => !isSandboxName(w))) refuse("vars.SANDBOX_WORKERS", `every name must start with ${SANDBOX_NAME_PREFIX} and be a valid slug`);
+  }
+  if (!isSandboxName(target.name)) refuse("name", `must start with ${SANDBOX_NAME_PREFIX} and be a valid slug`);
+
+  checkDatabases(target, violations);
+  const databases = asArray(target.d1_databases);
+  if (databases.some((db) => typeof db?.database_name !== "string" || !db.database_name.startsWith(SANDBOX_NAME_PREFIX))) refuse("d1_databases.database_name", `must start with ${SANDBOX_NAME_PREFIX}`);
+  if (databases.some((db) => typeof db?.database_id !== "string" || isPlaceholder(db.database_id))) refuse("d1_databases.database_id", "placeholder id: not allowed for remote");
+  if (asArray(target.r2_buckets).some((b) => typeof b?.bucket_name !== "string" || !b.bucket_name.startsWith(SANDBOX_NAME_PREFIX))) refuse("r2_buckets.bucket_name", `must start with ${SANDBOX_NAME_PREFIX}`);
+  return { ok: violations.length === 0, violations, warnings: [] };
 }
