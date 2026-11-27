@@ -126,6 +126,50 @@ Formato de cada punto: **Hacer**, **Verificar**, **Esperado**, **Revertir**.
 - **Esperado**: Vite acepta `*.localhost` y conserva el `Host`.
 - **Revertir**: borra `.wrangler/state-cloud`.
 
+## 10. Sandbox en workers.dev (misma cuenta)
+
+Alternativa cuando solo tienes la cuenta de Cloudflare del piloto y ningún dominio de pruebas. El código es el mismo, pero se despliega como **dos Workers** que comparten **una** D1 y **un** bucket R2 propios de la sandbox. workers.dev da un hostname por Worker (`<nombre-del-worker>.<subdominio-de-la-cuenta>.workers.dev`), así que cada Worker se resuelve como un tenant de subdominio de la plataforma (slug igual al nombre del Worker).
+
+**Qué se puede probar**: resolución de tenants por host, páginas públicas, aislamiento entre los dos tenants, recibos en R2, limitadores y migraciones de D1.
+
+**Qué no se puede probar** (sigue necesitando un dominio aparte, secciones 1 a 5): rutas comodín, `send_email` y enlaces mágicos, correo entrante de Deuna y Email Routing, y el cron de purga. Por lo mismo, el **inicio de sesión del admin no es probable aquí**, porque el admin de Cloud usa enlaces mágicos. La sandbox de workers.dev no define `send_email`, `MAIL_ARCHIVE` ni cron.
+
+**Reglas de seguridad** (las aplica `scripts/cloud-guard.mjs --sandbox`, que corre antes de cada comando remoto y de nuevo antes de cada proceso que se lanza; rechaza ante cualquier duda):
+
+- Solo se usa `wrangler.sandbox.jsonc`, y solo se aceptan estas claves de primer nivel: `name`, `main`, `compatibility_date`, `compatibility_flags`, `workers_dev`, `preview_urls`, `account_id`, `assets`, `images`, `rules`, `d1_databases`, `r2_buckets`, `ratelimits`, `vars`, `observability`. Cualquier otra (`services`, `queues`, `routes`, `triggers`, `env`, `build`...) se rechaza.
+- `vars.SANDBOX = "true"`, `TENANCY = "multi"`, `workers_dev = true`, `ROOT_DOMAIN` con la forma `<subdominio>.workers.dev`, una sola D1 (binding `DB`) y un solo bucket (binding `RECEIPTS`).
+- Los nombres de los Workers, de la D1 y del bucket empiezan por `rekauda-sandbox-`. Ningún nombre ni id puede coincidir con los del piloto, en ninguna forma de escribir un id (con o sin guiones, con llaves, en mayúsculas). Solo `account_id` puede coincidir, porque es la misma cuenta.
+- La guarda debe conocer los datos reales del piloto en tres categorías: un nombre de Worker, un id de D1 (UUID) y un bucket R2. Salen de tu `wrangler.jsonc` local y/o de `.pilot-resources.json` con esta forma, con valores inventados: `{ "workers": ["worker-piloto"], "d1Ids": ["11111111-2222-3333-4444-555555555555"], "buckets": ["bucket-piloto"], "ratelimitIds": ["1001"], "names": [], "ids": [], "domains": [] }`. Otras claves o tipos distintos se rechazan. Si falta una categoría, la guarda se niega a ejecutar comandos remotos.
+- Un archivo de configuración con claves repetidas se rechaza.
+- Los scripts `sandbox:*` no aceptan argumentos y lanzan wrangler con un entorno reducido (`PATH`, `HOME`, `TMPDIR`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `NODE_ENV`): `CLOUDFLARE_ENV` y `WRANGLER_*` se descartan.
+
+**Pasos manuales** (nada se crea automáticamente). Cada comando de `wrangler` lleva `--config wrangler.sandbox.jsonc`, y cada bloque empieza con `wrangler whoami` para confirmar la cuenta. Si `wrangler` ofrece escribir el binding en un archivo de configuración, responde **no**.
+
+1. Crea la D1 y el bucket con nombres que empiecen por `rekauda-sandbox-` (la configuración debe existir antes, `pnpm sandbox:guard` la copia del ejemplo):
+
+   ```
+   wrangler whoami
+   wrangler d1 create rekauda-sandbox-db --config wrangler.sandbox.jsonc
+   wrangler r2 bucket create rekauda-sandbox-files --config wrangler.sandbox.jsonc
+   ```
+
+2. Completa `wrangler.sandbox.jsonc` (se copia de `wrangler.sandbox.example.jsonc` al correr cualquier script): `database_id` de la D1, `name` y `vars.SANDBOX_WORKERS` (dos nombres que empiecen por `rekauda-sandbox-`) y `vars.ROOT_DOMAIN` con el subdominio workers.dev de tu cuenta. Completa también los datos del piloto descritos arriba.
+3. `pnpm sandbox:guard` (debe terminar en `OK (sandbox)`).
+4. `pnpm sandbox:migrate` aplica `migrations-cloud` a la D1 de la sandbox.
+5. `pnpm sandbox:seed` crea un tenant ficticio por Worker (Colegio Demo A y B) con datos inventados. Es idempotente y no crea usuarios, sesiones ni secretos.
+6. `pnpm sandbox:deploy` compila una vez y despliega cada Worker con `--name`. `pnpm sandbox:status` lista los despliegues (solo lectura).
+7. Verifica `https://<worker-a>.<subdominio>.workers.dev/` y `https://<worker-b>.<subdominio>.workers.dev/`: cada uno debe mostrar su curso.
+
+**Revertir** (mismas reglas: `wrangler whoami` primero, `--config wrangler.sandbox.jsonc` siempre, y **no** a cualquier oferta de escribir bindings). Vacía el bucket antes de borrarlo. No toques ningún recurso del piloto.
+
+```
+wrangler whoami
+wrangler delete --name rekauda-sandbox-a --config wrangler.sandbox.jsonc
+wrangler delete --name rekauda-sandbox-b --config wrangler.sandbox.jsonc
+wrangler d1 delete rekauda-sandbox-db --config wrangler.sandbox.jsonc
+wrangler r2 bucket delete rekauda-sandbox-files --config wrangler.sandbox.jsonc
+```
+
 ## Pendientes conocidos (no construidos)
 
 - Herramienta de alta y rotación del token de entrada (`inbound_token`).

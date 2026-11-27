@@ -54,6 +54,35 @@ function stripTrailingCommas(text) {
   return out;
 }
 
-export function parseJsonc(text) {
-  return JSON.parse(stripTrailingCommas(stripComments(text.replace(/^\uFEFF/, ""))));
+/** Throws when any object of the (comment-free) JSON text repeats a key. Keys are compared after decoding escapes. */
+function assertNoDuplicateKeys(text) {
+  const stack = []; // a Set of keys per open object, null per open array
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "{") stack.push(new Set());
+    else if (ch === "[") stack.push(null);
+    else if (ch === "}" || ch === "]") stack.pop();
+    else if (ch === '"') {
+      let j = i + 1;
+      while (text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      const token = text.slice(i, j + 1);
+      i = j;
+      let k = j + 1;
+      while (/\s/.test(text[k] ?? "")) k++;
+      const keys = stack[stack.length - 1];
+      if (text[k] === ":" && keys) {
+        const key = JSON.parse(token);
+        if (keys.has(key)) throw new Error("Duplicate key in JSONC");
+        keys.add(key);
+      }
+    }
+  }
+}
+
+/** Parses JSONC. With { rejectDuplicates: true } a repeated key in any object is an error (no last-wins ambiguity). */
+export function parseJsonc(text, { rejectDuplicates = false } = {}) {
+  const clean = stripTrailingCommas(stripComments(text.replace(/^\uFEFF/, "")));
+  const value = JSON.parse(clean);
+  if (rejectDuplicates) assertNoDuplicateKeys(clean);
+  return value;
 }

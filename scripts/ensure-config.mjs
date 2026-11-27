@@ -9,6 +9,7 @@ const files = [
   ["rekauda.config.example.ts", "rekauda.config.ts", "edit it with your school's data"],
   ["wrangler.example.jsonc", "wrangler.jsonc", "fill in account_id, database_id and the R2/ratelimit names before deploying"],
   ["wrangler.cloud.example.jsonc", "wrangler.cloud.jsonc", "keep it local; scripts/cloud-guard.mjs refuses any resource shared with the pilot"],
+  ["wrangler.sandbox.example.jsonc", "wrangler.sandbox.jsonc", "keep it local; scripts/cloud-guard.mjs --sandbox refuses it unless every sandbox check passes"],
 ];
 
 for (const [example, target, hint] of files) {

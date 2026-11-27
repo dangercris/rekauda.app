@@ -38,3 +38,23 @@ describe("parseJsonc", () => {
     expect(parseJsonc('\uFEFF{"a":1}')).toEqual({ a: 1 });
   });
 });
+
+describe("parseJsonc with rejectDuplicates", () => {
+  const strict = (text: string) => parseJsonc(text, { rejectDuplicates: true });
+
+  it("keeps last-wins by default and refuses a duplicate key in strict mode", () => {
+    expect(parseJsonc('{"a":1,"a":2}')).toEqual({ a: 2 });
+    expect(() => strict('{"a":1,"a":2}')).toThrow(/duplicate/i);
+  });
+
+  it("detects duplicates in nested objects, across comments and through escapes", () => {
+    expect(() => strict('{"o":{"b":1,/* c */"b":2}}')).toThrow(/duplicate/i);
+    expect(() => strict('{"name":1,"na\\u006de":2}')).toThrow(/duplicate/i);
+    expect(() => strict('{"l":[{"k":1,"k":2}]}')).toThrow(/duplicate/i);
+  });
+
+  it("accepts the same key in different objects and keys that look like values", () => {
+    expect(strict('{"a":{"x":1},"b":{"x":2},"l":[{"x":1},{"x":2}],"s":"a","t":"a"}')).toEqual({ a: { x: 1 }, b: { x: 2 }, l: [{ x: 1 }, { x: 2 }], s: "a", t: "a" });
+    expect(strict('{"a":"x","b":"x"}')).toEqual({ a: "x", b: "x" });
+  });
+});
