@@ -152,6 +152,23 @@ describe("payments list", () => {
 });
 
 describe("verify payment", () => {
+  it("labels a payment reviewed by a user id as treasury", async () => {
+    openAt("#pago/p9");
+    const reviewed = makePayment({
+      id: "p9",
+      code: "ZZZ-999",
+      status: "recibido",
+      reviewedBy: "0b1c2d3e-0000-4000-8000-00000000abcd",
+      reviewedAt: "2026-11-20T15:00:00.000Z",
+    });
+    const api = signedInApi({ "GET /api/admin/payments": () => json(200, { payments: [reviewed] }) });
+    vi.stubGlobal("fetch", api.fetch);
+    render(<App />);
+
+    expect(await screen.findByText(/· tesorería$/)).toBeInTheDocument();
+    expect(screen.queryByText(/revisión automática/)).not.toBeInTheDocument();
+  });
+
   it("requires a note to observe, rolls back when the server fails, then moves to the next payment", async () => {
     openAt("#pago/p1");
     let fail = true;

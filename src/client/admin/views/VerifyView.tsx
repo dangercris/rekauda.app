@@ -31,6 +31,7 @@ import { useAdminData } from "../data/AdminData";
 import { nextInQueue, studentName, studentNames } from "../data/payments";
 import { needsNote } from "../data/usePaymentActions";
 import { paymentsBackHash } from "../lastList";
+import { reviewerLabel } from "../reviewer-label";
 import { useApiErrorGate } from "../session/SessionContext";
 import { ACTION_LABEL, DONE_MESSAGE, automaticChecks, reasonPresets, splitActions } from "./review";
 import styles from "./VerifyView.module.css";
@@ -385,7 +386,7 @@ function PaymentDetail({ payment, collection, onRefetch }: { payment: AdminPayme
               <Row label="Código" value={payment.code} mono />
               <Row label="Registrado" value={dateTime(payment.createdAt)} />
               {payment.reviewedAt && (
-                <Row label="Revisado" value={`${dateTime(payment.reviewedAt)} · ${payment.reviewedBy === "admin" ? "tesorería" : payment.reviewedBy === "deuna" ? "notificación de Deuna" : "revisión automática"}`} />
+                <Row label="Revisado" value={`${dateTime(payment.reviewedAt)} · ${reviewerLabel(payment.reviewedBy) ?? "revisión automática"}`} />
               )}
               {payment.paidAt && <Row label="Pagado" value={dateTime(payment.paidAt)} />}
             </dl>
