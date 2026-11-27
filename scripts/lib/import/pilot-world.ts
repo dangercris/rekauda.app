@@ -21,7 +21,7 @@ export const SLUG = "curso-demo";
 export const OTHER = "d0000000-0000-4000-8000-0000000000d1";
 export const NOW = "2026-11-27T00:00:00Z";
 
-export function makePilotWorld({ plan = true, tenant = { slug: SLUG, source: "pilot_import" } as { slug: string; source: string } | null, extraFiles = {} as Record<string, string> } = {}) {
+export function makePilotWorld({ plan = true, provisioned = true, tenant = { slug: SLUG, source: "pilot_import" } as { slug: string; source: string } | null, extraFiles = {} as Record<string, string> } = {}) {
   const root = fakeCheckout("import-world", extraFiles);
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "import-world-tmp-")));
   dirs.push(root, tmp);
@@ -33,6 +33,8 @@ export function makePilotWorld({ plan = true, tenant = { slug: SLUG, source: "pi
     const hash = canonicalHash(tables);
     manifest.exports.push({ file: `export-${n}.json`, hash, counts: {}, at: NOW, matchesFirst: n === 1 ? null : hash === manifest.exports[0].hash });
   }
+  // prod:provision records the tenant in the manifest; a world for provisioning tests starts without it.
+  if (provisioned) manifest.tenant = { id: TENANT_ID, slug: SLUG, state: "provisioned" };
   writeManifest(dir, manifest);
   const quiet = { error: () => undefined, warn: () => undefined, log: () => undefined };
   if (plan) expect(runImportPlan([dir, TENANT_ID], { root: root + "/", log: quiet, tmp })).toBe(0);

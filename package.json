@@ -34,7 +34,8 @@
     "prod:import": "node scripts/cloud-wrangler.mjs prod:import",
     "prod:validate": "node scripts/cloud-wrangler.mjs prod:validate",
     "prod:undo-data": "node scripts/cloud-wrangler.mjs prod:undo-data",
-    "prod:undo-tenant": "node scripts/cloud-wrangler.mjs prod:undo-tenant"
+    "prod:undo-tenant": "node scripts/cloud-wrangler.mjs prod:undo-tenant",
+    "prod:provision": "node scripts/cloud-wrangler.mjs prod:provision"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^8.0.0",

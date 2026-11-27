@@ -1,10 +1,10 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { NOW, OTHER, SLUG, makePilotWorld } from "./pilot-world";
 import { TENANT_ID } from "./pilot-fixture";
 // @ts-expect-error plain .mjs module without types
-import { readManifest } from "../private-workdir.mjs";
+import { readManifest, writeManifest } from "../private-workdir.mjs";
 // @ts-expect-error plain .mjs module without types
 import { runUndo, undoStatements } from "./undo.mjs";
 
@@ -207,5 +207,122 @@ describe("undo-tenant", () => {
 
   it("refuses an id that is not a plain id", () => {
     expect(() => undoStatements(TENANT_ID, { tenant: true, userIds: ["x'; DROP TABLE tenants; --"] })).toThrow();
+  });
+});
+
+describe("undo-tenant of a tenant that has no import plan (a provisioning that did not finish)", () => {
+  const unfinished = (state = "provisioning") => {
+    const w = imported({ plan: false });
+    const m = readManifest(w.dir);
+    m.tenant = { id: TENANT_ID, slug: SLUG, state };
+    writeManifest(w.dir, m);
+    return w;
+  };
+
+  it("removes a tenant with zero data rows and clears the tenant (and any plan record) from the manifest so provisioning can run again", () => {
+    const w = unfinished();
+    expect(w.undo(true)).toBe(0);
+    expect(w.one(`SELECT COUNT(*) AS n FROM tenants WHERE id = '${TENANT_ID}'`)).toBe(0);
+    expect(readManifest(w.dir).tenant).toBeUndefined();
+    expect(w.one(`SELECT COUNT(*) AS n FROM tenants WHERE id = '${OTHER}'`)).toBe(1);
+  });
+
+  it("never deletes the owner the manifest says was reused, and does not count it as a leftover", () => {
+    const w = unfinished();
+    const m = readManifest(w.dir);
+    m.tenant.reusedOwnerId = OWNER;
+    writeManifest(w.dir, m);
+    expect(w.undo(true)).toBe(0);
+    expect(w.statements.some((s) => s.includes(`'${OWNER}'`) && s.startsWith("DELETE FROM users"))).toBe(false);
+    expect(w.one(`SELECT COUNT(*) AS n FROM users WHERE id = '${OWNER}'`)).toBe(1);
+    expect(w.one(`SELECT COUNT(*) AS n FROM users WHERE id = '${SOLE}'`)).toBe(0);
+    expect(w.one(`SELECT COUNT(*) AS n FROM tenants WHERE id = '${TENANT_ID}'`)).toBe(0);
+    expect(readFileSync(join(w.dir, "undo-users.json"), "utf8")).not.toContain(OWNER);
+  });
+
+  it("drops the reused id from a stale undo-users.json written by an earlier run", () => {
+    const w = unfinished();
+    const m = readManifest(w.dir);
+    m.tenant.reusedOwnerId = OWNER;
+    writeManifest(w.dir, m);
+    writeFileSync(join(w.dir, "undo-users.json"), JSON.stringify([OWNER, SOLE]));
+    expect(w.undo(true)).toBe(0);
+    expect(w.one(`SELECT COUNT(*) AS n FROM users WHERE id = '${OWNER}'`)).toBe(1);
+    expect(w.one(`SELECT COUNT(*) AS n FROM users WHERE id = '${SOLE}'`)).toBe(0);
+  });
+
+  it("a rerun after the tenant row is gone keeps the reused owner and still verifies", () => {
+    const w = imported({ plan: false, tenant: null });
+    const m = readManifest(w.dir);
+    m.tenant = { id: TENANT_ID, slug: SLUG, state: "provisioning", reusedOwnerId: OWNER };
+    writeManifest(w.dir, m);
+    writeFileSync(join(w.dir, "undo-users.json"), JSON.stringify([OWNER]));
+    expect(w.undo(true)).toBe(0);
+    expect(w.one(`SELECT COUNT(*) AS n FROM users WHERE id = '${OWNER}'`)).toBe(1);
+    expect(readManifest(w.dir).tenant).toBeUndefined();
+  });
+
+  it("refuses, deleting nothing, when the manifest has a reused owner but names another tenant", () => {
+    const w = imported();
+    const m = readManifest(w.dir);
+    m.tenant = { id: OTHER, slug: "otro-curso", state: "provisioned", reusedOwnerId: OWNER };
+    writeManifest(w.dir, m);
+    expect(w.undo(true)).toBe(1);
+    expect(w.statements).toEqual([]);
+    expect(w.one(`SELECT COUNT(*) AS n FROM tenants WHERE id = '${TENANT_ID}'`)).toBe(1);
+  });
+
+  it.each([[null], [""], [42], ["x'; DROP TABLE users; --"], [["a"]]])("refuses, deleting nothing, when the manifest says an owner was reused but the id is malformed (%j)", (bad) => {
+    const w = unfinished();
+    const m = readManifest(w.dir);
+    m.tenant.reusedOwnerId = bad;
+    writeManifest(w.dir, m);
+    expect(w.undo(true)).toBe(1);
+    expect(w.statements).toEqual([]);
+    expect(w.one(`SELECT COUNT(*) AS n FROM tenants WHERE id = '${TENANT_ID}'`)).toBe(1);
+  });
+
+  it("an owner that was not reused is deleted as before", () => {
+    const w = unfinished();
+    expect(w.undo(true)).toBe(0);
+    expect(w.one(`SELECT COUNT(*) AS n FROM users WHERE id = '${OWNER}'`)).toBe(0);
+  });
+
+  it("refuses when the tenant has any row in the four data tables (it may be live), deleting nothing", () => {
+    const w = unfinished();
+    w.addCollection(TENANT_ID, "c-live", "vivo-demo");
+    expect(w.undo(true)).toBe(1);
+    expect(w.statements).toEqual([]);
+    expect(readManifest(w.dir).tenant).toBeDefined();
+  });
+
+  it("refuses when the manifest names another tenant or none, and the data-level undo still needs the plan", () => {
+    const w = unfinished();
+    const m = readManifest(w.dir);
+    m.tenant = { id: OTHER, slug: "otro-curso", state: "provisioning" };
+    writeManifest(w.dir, m);
+    expect(w.undo(true)).toBe(1);
+    delete m.tenant;
+    writeManifest(w.dir, m);
+    expect(w.undo(true)).toBe(1);
+    expect(unfinished().undo(false)).toBe(1);
+    expect(w.statements).toEqual([]);
+  });
+
+  it("when the tenant row was never written, only the manifest is cleared", () => {
+    const w = imported({ plan: false, tenant: null });
+    const m = readManifest(w.dir);
+    m.tenant = { id: TENANT_ID, slug: SLUG, state: "provisioning" };
+    writeManifest(w.dir, m);
+    expect(w.undo(true)).toBe(0);
+    expect(readManifest(w.dir).tenant).toBeUndefined();
+  });
+
+  it("after an undo with a plan the manifest is cleared as well", () => {
+    const w = imported();
+    expect(w.undo(true)).toBe(0);
+    const m = readManifest(w.dir);
+    expect(m.tenant).toBeUndefined();
+    expect(m.plan).toBeUndefined();
   });
 });
