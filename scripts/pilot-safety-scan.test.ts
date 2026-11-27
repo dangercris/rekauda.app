@@ -33,20 +33,38 @@ describe("scripts/ safety scan", () => {
 
 describe("the only path to --remote", () => {
   const wrapper = sources.find((s) => s.name === "lib/cloud-wrangler-core.mjs")!.text;
-  const start = wrapper.indexOf("function runSandbox");
-  const end = wrapper.indexOf("/** root ends with a slash");
-  const outsideSandbox = (wrapper.slice(0, start) + wrapper.slice(end)).split("\n");
+  // The functions allowed to build a --remote command line, each with its fixed config constant.
+  // pilot-export joins this list in its own change.
+  const REMOTE_FUNCTIONS = [
+    { fn: "function runSandbox", config: "SANDBOX_CONFIG" },
+    { fn: "function runProduction", config: "PRODUCTION_CONFIG" },
+  ];
+  const bodyOf = (fn: string) => {
+    const from = wrapper.indexOf(fn);
+    return { from, to: wrapper.indexOf("\n}\n", from), text: "" };
+  };
+  const bodies = REMOTE_FUNCTIONS.map((f) => {
+    const range = bodyOf(f.fn);
+    return { ...f, ...range, text: wrapper.slice(range.from, range.to) };
+  });
+  // Cut the ranges from the end of the file backwards, so the result does not depend on the order of the functions.
+  const outside = [...bodies].sort((x, y) => y.from - x.from).reduce((rest, b) => rest.slice(0, b.from) + rest.slice(b.to), wrapper).split("\n");
 
-  it("lives in the sandbox function of the wrapper", () => {
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    expect(wrapper.slice(start, end)).toContain('"--remote"');
+  it.each(bodies)("lives in $fn of the wrapper", ({ from, text }) => {
+    expect(from).toBeGreaterThan(-1);
+    expect(text).toContain('"--remote"');
   });
 
-  it("outside that function, the wrapper mentions the flag only to reject it", () => {
-    for (const line of outsideSandbox.filter((l) => l.includes("--remote"))) {
+  it("outside those functions, the wrapper mentions the flag only to reject it", () => {
+    for (const line of outside.filter((l) => l.includes("--remote"))) {
       expect(line.trimStart().startsWith("//") || line.includes("FORBIDDEN_LONG")).toBe(true);
     }
+  });
+
+  it("confirm.mjs and the production loader never build a remote command", () => {
+    const text = sources.find((s) => s.name === "lib/confirm.mjs")!.text;
+    expect(text).not.toContain("--remote");
+    expect(INVOKES_WRANGLER.test(text)).toBe(false);
   });
 
   it("the seed builder and the guard libraries never build a remote command", () => {
@@ -57,10 +75,10 @@ describe("the only path to --remote", () => {
     }
   });
 
-  it("every remote step of the sandbox function carries the fixed sandbox config", () => {
-    const body = wrapper.slice(start, end);
-    expect(body).toContain("SANDBOX_CONFIG");
-    for (const line of body.split("\n").filter((l) => l.includes('"--remote"'))) expect(line).toContain("SANDBOX_CONFIG");
+  it.each(bodies)("every wrangler( call and remote step of $fn carries its fixed config", ({ config, text }) => {
+    const lines = text.split("\n").filter((l) => l.includes("wrangler(") || l.includes('"--remote"'));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).toContain(config);
   });
 });
 

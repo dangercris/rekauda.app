@@ -4,19 +4,34 @@
 // The binary is a parameter of runCloudWrangler (tests inject a fake spawn). It is NEVER read from the environment:
 // the CLI entry (scripts/cloud-wrangler.mjs) always passes the checkout's own wrangler. No dependencies.
 //
-// The sandbox:* subcommands are the ONLY place in the repo that builds a --remote command line. Each one runs the
+// The sandbox:* and prod:* subcommands are the ONLY place in the repo that builds a --remote command line. Each one runs the
 // sandbox guard first (workers.dev only, same account as the pilot, nothing shared with the pilot), takes no arguments
-// and always passes the fixed config wrangler.sandbox.jsonc.
+// and always passes the fixed config wrangler.sandbox.jsonc. The prod:* subcommands do the same with the production guard
+// and wrangler.production.jsonc, and every one that changes something also needs a typed confirmation from a TTY.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildSandboxSeedSql } from "./cloud-sandbox-seed.mjs";
-import { loadAndCheck, loadAndCheckSandbox, report } from "./cloud-guard-io.mjs";
+import { loadAndCheck, loadAndCheckProduction, loadAndCheckSandbox, report } from "./cloud-guard-io.mjs";
+import { confirmTyped } from "./confirm.mjs";
 
 const SUBCOMMANDS = ["dev", "d1", "types"];
 const SANDBOX_SUBCOMMANDS = ["sandbox:migrate", "sandbox:seed", "sandbox:deploy", "sandbox:status"];
 const SANDBOX_CONFIG = ["--config", "wrangler.sandbox.jsonc"];
+const PRODUCTION_CONFIG = ["--config", "wrangler.production.jsonc"];
+/**
+ * Production commands: apex policy of the guard, and the phrase to type (none for the read-only status).
+ * IMPORTANT: wrangler deploy replaces the Worker's route list. Removing the apex entry from the config and deploying
+ * DETACHES the apex and takes it offline. So prod:deploy accepts the apex entry, but whenever it is present the phrase
+ * is SWITCH APEX (same gate as prod:switch-apex): attaching or keeping the apex always needs an explicit confirmation.
+ */
+const PRODUCTION_COMMANDS = {
+  "prod:migrate": { apex: "any", phrase: "MIGRATE PRODUCTION" },
+  "prod:deploy": { apex: "any", phrase: "DEPLOY PRODUCTION" },
+  "prod:switch-apex": { apex: "require", phrase: "SWITCH APEX" },
+  "prod:status": { apex: "any", phrase: undefined },
+};
 const D1_ACTIONS = ["execute", "migrations"];
 const FORBIDDEN_LONG = ["--remote", "--config", "--env", "--env-file", "--persist-to", "--local"];
 
@@ -35,16 +50,16 @@ const SANDBOX_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "CLOUDFLARE_API_TOKEN", "CLO
 const scrubbedEnv = (env) => Object.fromEntries(SANDBOX_ENV_KEYS.filter((key) => env[key] !== undefined).map((key) => [key, env[key]]));
 
 /**
- * Runs each step in order and stops at the first failure. Before EVERY spawn the sandbox guard runs again against a fresh
- * read of the files, and the config must be identical to the one first checked: a change in between is a refusal.
+ * Runs each step in order and stops at the first failure. Before EVERY spawn the guard (`checkFn`) runs again against a
+ * fresh read of the files, and the config must be identical to the one first checked: a change in between is a refusal.
  */
-function runSteps(steps, { root, spawn, log, env, checked }) {
+function runSteps(steps, { root, spawn, log, env, checked, checkFn = loadAndCheckSandbox }) {
   for (const { bin, argv } of steps) {
-    const again = loadAndCheckSandbox({ root });
+    const again = checkFn({ root });
     report(again.result, log);
     if (!again.result.ok) return 1;
     if (JSON.stringify(again.target) !== checked) {
-      log.error("[cloud-wrangler] REFUSED: wrangler.sandbox.jsonc changed while the command was running.");
+      log.error("[cloud-wrangler] REFUSED: the wrangler config changed while the command was running.");
       return 1;
     }
     const status = spawn(bin, argv, { cwd: root, stdio: "inherit", env }).status ?? 1;
@@ -76,9 +91,40 @@ function runSandbox(subcommand, { root, bin, viteBin, spawn, log, now, env }) {
   }
 }
 
+/** Runs a production subcommand: guard with the command's apex policy, typed phrase, then fixed argv with a scrubbed env. */
+function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confirm }) {
+  const { apex, phrase: basePhrase } = PRODUCTION_COMMANDS[subcommand];
+  const checkFn = ({ root: r }) => loadAndCheckProduction({ root: r, apex });
+  const { result, target } = checkFn({ root });
+  report(result, log);
+  if (!result.ok) return 1;
+  const phrase = subcommand === "prod:deploy" && Array.isArray(target.routes) && target.routes.length > 1 ? PRODUCTION_COMMANDS["prod:switch-apex"].phrase : basePhrase;
+  if (phrase !== undefined) {
+    // What the operator is about to confirm: names only, never a token.
+    log.warn(`[cloud-wrangler] ${subcommand}: worker=${target.name} account=${target.account_id ?? "(not set)"} root=${target.vars.ROOT_DOMAIN}`);
+  }
+  if (phrase !== undefined && !confirm(phrase)) {
+    log.error(`[cloud-wrangler] REFUSED: ${subcommand} needs the typed confirmation phrase on a terminal.`);
+    return 1;
+  }
+  const run = (steps) => runSteps(steps, { root, spawn, log, env: scrubbedEnv(env), checked: JSON.stringify(target), checkFn });
+  const wrangler = (...argv) => ({ bin, argv });
+  if (subcommand === "prod:migrate") return run([wrangler("d1", "migrations", "apply", "DB", "--remote", ...PRODUCTION_CONFIG)]);
+  if (subcommand === "prod:status") return run([wrangler("deployments", "list", ...PRODUCTION_CONFIG)]);
+  return run([{ bin: viteBin, argv: ["build"] }, wrangler("deploy", ...PRODUCTION_CONFIG)]);
+}
+
 /** root ends with a slash. Returns the exit status. */
-export function runCloudWrangler(args, { root, bin = root + "node_modules/.bin/wrangler", viteBin = root + "node_modules/.bin/vite", spawn = spawnSync, log = console, now = () => new Date().toISOString(), env = process.env }) {
+export function runCloudWrangler(args, { root, bin = root + "node_modules/.bin/wrangler", viteBin = root + "node_modules/.bin/vite", spawn = spawnSync, log = console, now = () => new Date().toISOString(), env = process.env, confirm = (phrase) => confirmTyped(phrase) }) {
   const [subcommand, ...rest] = args;
+  if (Object.hasOwn(PRODUCTION_COMMANDS, subcommand)) {
+    const bad = forbiddenArg(rest);
+    if (bad || rest.length > 0) {
+      log.error(`[cloud-wrangler] REFUSED: ${subcommand} takes no arguments (${bad ?? "extra argument"} is fixed by the wrapper).`);
+      return 1;
+    }
+    return runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confirm });
+  }
   if (SANDBOX_SUBCOMMANDS.includes(subcommand)) {
     const bad = forbiddenArg(rest);
     if (bad || rest.length > 0) {
@@ -88,7 +134,7 @@ export function runCloudWrangler(args, { root, bin = root + "node_modules/.bin/w
     return runSandbox(subcommand, { root, bin, viteBin, spawn, log, now, env });
   }
   if (!SUBCOMMANDS.includes(subcommand)) {
-    log.error(`[cloud-wrangler] REFUSED: only ${[...SUBCOMMANDS, ...SANDBOX_SUBCOMMANDS].join(", ")} are allowed on this branch.`);
+    log.error(`[cloud-wrangler] REFUSED: only ${[...SUBCOMMANDS, ...SANDBOX_SUBCOMMANDS, ...Object.keys(PRODUCTION_COMMANDS)].join(", ")} are allowed on this branch.`);
     return 1;
   }
   if (subcommand === "d1" && !D1_ACTIONS.includes(rest[0])) {
