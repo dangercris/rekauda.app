@@ -1,6 +1,6 @@
-// pilot:import:plan <workdir> <tenant-id>: local only, it never touches the network or any remote resource. It takes the
+// pilot:import:plan <workdir>: local only, it never touches the network or any remote resource. It takes the
 // latest pilot export from the private workdir, runs the preflight, and writes the generated INSERT file (0600) into the
-// same workdir. It prints counts only. Refuses unless two exports of the pilot matched and no mismatch was ever seen.
+// same workdir. The tenant id is NOT an argument: it is the one prod:provision recorded in the manifest. It prints counts only. Refuses unless two exports of the pilot matched and no mismatch was ever seen.
 import { closeSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
 import { hash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -11,10 +11,10 @@ import { buildImportSql, MAX_BYTES } from "./chunk.mjs";
 import { IMPORT_TABLES } from "./columns.mjs";
 import { assertNodeVersion, loadSnapshot } from "./pilot-snapshot.mjs";
 import { runPreflight } from "./preflight.mjs";
+import { SLUG, UUID } from "./target.mjs";
 import { transform } from "./transform.mjs";
 
 export const PLAN_FILE = "import.sql";
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** The freeze must be proven: at least two exports, no mismatch ever seen, and the latest one equal to the first. */
 export function checkManifestGate(manifest) {
@@ -84,8 +84,7 @@ function writePlan(path, text) {
 
 export function runImportPlan(args, { root, log = console, tmp = tmpdir() }) {
   const refuse = (why) => (log.error(`[import-plan] REFUSED: ${why}`), 1);
-  if (args.length !== 2 || args.some((a) => a.startsWith("-"))) return refuse("pass exactly two arguments: the workdir and the tenant id.");
-  if (!UUID.test(args[1])) return refuse("the tenant id must be the UUID printed by provisioning.");
+  if (args.length !== 1 || args[0].startsWith("-")) return refuse("pass exactly one argument: the workdir.");
   try {
     assertNodeVersion();
     const { dir, manifest } = openWorkdir(args[0], { root, tmp });
@@ -95,6 +94,8 @@ export function runImportPlan(args, { root, log = console, tmp = tmpdir() }) {
       delete manifest.plan;
       writeManifest(dir, manifest);
     }
+    const tenantId = manifest.tenant?.id;
+    if (typeof tenantId !== "string" || !UUID.test(tenantId) || typeof manifest.tenant.slug !== "string" || !SLUG.test(manifest.tenant.slug) || manifest.tenant.state !== "provisioned") return refuse("the workdir has no finished provisioning; run prod:provision first (or prod:undo-tenant if an earlier run did not finish).");
     if (!checkManifestGate(manifest).ok) return refuse("needs two matching pilot exports and no mismatch ever seen.");
     const latest = manifest.exports.at(-1);
     const tables = JSON.parse(readFileSync(join(dir, latest.file), "utf8")).tables;
@@ -106,11 +107,11 @@ export function runImportPlan(args, { root, log = console, tmp = tmpdir() }) {
       log.error(`[import-plan] PREFLIGHT FAILED (counts only): ${pre.failures.map((f) => `${f.check}=${f.count}`).join(" ")}`);
       return 1;
     }
-    const statements = buildImportSql(transform(db, { tenantId: args[1] }));
+    const statements = buildImportSql(transform(db, { tenantId }));
     if (statements.some((s) => Buffer.byteLength(s, "utf8") > MAX_BYTES)) throw new Error("x");
     const text = statements.join("\n") + "\n";
     writePlan(join(dir, PLAN_FILE), text);
-    writeManifest(dir, { ...manifest, plan: { file: PLAN_FILE, sha256: sha256(text), tenantId: args[1], exportFile: latest.file, exportHash: latest.hash } });
+    writeManifest(dir, { ...manifest, plan: { file: PLAN_FILE, sha256: sha256(text), tenantId, exportFile: latest.file, exportHash: latest.hash } });
     log.log(`[import-plan] ${statements.length} statements written to ${PLAN_FILE} in the workdir.`);
     return 0;
   } catch {

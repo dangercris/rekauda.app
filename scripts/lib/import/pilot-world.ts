@@ -37,7 +37,7 @@ export function makePilotWorld({ plan = true, provisioned = true, tenant = { slu
   if (provisioned) manifest.tenant = { id: TENANT_ID, slug: SLUG, state: "provisioned" };
   writeManifest(dir, manifest);
   const quiet = { error: () => undefined, warn: () => undefined, log: () => undefined };
-  if (plan) expect(runImportPlan([dir, TENANT_ID], { root: root + "/", log: quiet, tmp })).toBe(0);
+  if (plan) expect(runImportPlan([dir], { root: root + "/", log: quiet, tmp })).toBe(0);
   const cloud = createCloudTestDb();
   const addTenant = (id: string, slug: string, source: string) => cloud.sqlite.exec(`INSERT INTO tenants (id, slug, config_json, r2_prefix, source, created_at, updated_at) VALUES ('${id}', '${slug}', '{}', 't/${id}/', '${source}', '${NOW}', '${NOW}')`);
   if (tenant) addTenant(TENANT_ID, tenant.slug, tenant.source);
