@@ -1,9 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { makeTables, type PilotTables } from "./pilot-fixture";
 // @ts-expect-error plain .mjs module without types
 import { assertNodeVersion, loadSnapshot } from "./pilot-snapshot.mjs";
 // @ts-expect-error plain .mjs module without types
-import { evaluateTarget, runPreflight } from "./preflight.mjs";
+import { CLOUD_CHECKS, PREFLIGHT_RULES, evaluateTarget, runPreflight } from "./preflight.mjs";
 
 const failuresOf = (tables: PilotTables): Record<string, number> => {
   const result = runPreflight(loadSnapshot(tables), tables);
@@ -55,6 +56,17 @@ describe("runPreflight", () => {
     ["invalid json column", (t: PilotTables) => { t.collections[0]!.options_json = "{oops"; }, "json"],
     ["receipt key for another id", (t: PilotTables) => { t.payments[0]!.receipt_key = "receipts/pay-9.jpg"; }, "receipt_key"],
     ["receipt key with bad extension", (t: PilotTables) => { t.payments[0]!.receipt_key = "receipts/pay-1.gif"; }, "receipt_key"],
+    ["max_per_payment below 1", (t: PilotTables) => { t.collections[0]!.max_per_payment = 0; }, "ranges"],
+    ["negative receipt_size", (t: PilotTables) => { t.payments[0]!.receipt_size = -1; }, "ranges"],
+    ["receipt_size above the safe range", (t: PilotTables) => { t.payments[0]!.receipt_size = 2 ** 60; }, "ranges"],
+    ["text match_score", (t: PilotTables) => { t.bank_movements[0]!.match_score = "high"; }, "ranges"],
+    ["student id below 1", (t: PilotTables) => { t.students[0]!.id = 0; }, "ranges"],
+    ["path-like payment id", (t: PilotTables) => { t.payments[0]!.id = "../../t/other/receipts/x"; }, "ids"],
+    ["payment id with a space", (t: PilotTables) => { t.payments[0]!.id = "pay 1"; }, "ids"],
+    ["non-ASCII collection id", (t: PilotTables) => { t.collections[0]!.id = "col-ñ"; }, "ids"],
+    ["dots-only movement id", (t: PilotTables) => { t.bank_movements[0]!.id = ".."; }, "ids"],
+    ["id longer than 64", (t: PilotTables) => { t.payments[0]!.id = "p".repeat(65); }, "ids"],
+    ["receipt key the Worker would refuse", (t: PilotTables) => { t.payments[0]!.id = "pay 1"; t.payments[0]!.receipt_key = "receipts/pay 1.jpg"; }, "receipt_key"],
     ["NUL in text", (t: PilotTables) => { t.payments[0]!.parent_name = "Ana\u0000"; }, "text"],
     ["lone surrogate in text", (t: PilotTables) => { t.payments[0]!.parent_name = "Ana\ud800"; }, "text"],
   ])("fails on %s with a count and no row content", (_label, change, check) => {
@@ -84,5 +96,39 @@ describe("evaluateTarget", () => {
     ["malformed result", { tenant: {} }],
   ])("refuses %s", (_label, state) => {
     expect(evaluateTarget(state, expected).ok).toBe(false);
+  });
+});
+
+describe("Cloud CHECK mirror", () => {
+  const baseline = readFileSync(new URL("../../../migrations-cloud/0001_baseline.sql", import.meta.url), "utf8");
+  const TABLES = ["collections", "payments", "students", "bank_movements"];
+  const norm = (text: string) => text.replace(/\s+/g, " ").trim();
+  /** Every `CHECK (...)` of the four data tables, as "table: <body>", with balanced parentheses. */
+  const parsed = (): string[] => {
+    const found: string[] = [];
+    for (const table of TABLES) {
+      const start = baseline.indexOf(`CREATE TABLE ${table} (`);
+      const body = baseline.slice(start, baseline.indexOf("\n);", start));
+      for (let at = body.indexOf("CHECK ("); at >= 0; at = body.indexOf("CHECK (", at + 1)) {
+        let depth = 0;
+        let i = at + 6;
+        do { depth += body[i] === "(" ? 1 : body[i] === ")" ? -1 : 0; i++; } while (depth > 0);
+        found.push(`${table}: ${norm(body.slice(at + 7, i - 1))}`);
+      }
+    }
+    return found;
+  };
+
+  it("finds the checks (guards the parser itself)", () => {
+    expect(parsed().length).toBeGreaterThanOrEqual(12);
+    expect(parsed()).toContain("collections: max_per_payment >= 1");
+  });
+
+  it("has a preflight rule for every CHECK of the baseline, and no stale entries", () => {
+    expect(Object.keys(CLOUD_CHECKS).sort()).toEqual([...new Set(parsed())].sort());
+  });
+
+  it("maps each CHECK to a rule that exists", () => {
+    for (const rule of Object.values(CLOUD_CHECKS)) expect(PREFLIGHT_RULES).toContain(rule);
   });
 });
