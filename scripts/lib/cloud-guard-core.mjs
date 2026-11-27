@@ -209,6 +209,30 @@ function sandboxPilot(pilot, pilotExample, extra, withRatelimits = false) {
   return { known: { values: { has }, domains: new Set() }, missing, problems };
 }
 
+const PILOT_DB_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/i;
+
+/**
+ * Read-only pilot export needs the pilot's D1 name and account id, and the same complete pilot knowledge as sandbox mode.
+ * Fails closed with generic reasons (never a value). Returns { result, dbName, accountId }; both are undefined unless ok.
+ */
+export function checkPilotReference({ pilot, pilotExample, extraDenylist }) {
+  const violations = [];
+  const refuse = (field, reason) => violations.push({ field, reason });
+  const { missing, problems } = sandboxPilot(pilot, pilotExample, extraDenylist);
+  for (const problem of problems) refuse("pilot", problem);
+  if (missing.length > 0) refuse("pilot", `pilot data incomplete, missing: ${missing.join(", ")}`);
+  const p = isObject(pilot) ? pilot : {};
+  const example = extractResources(pilotExample).values;
+  const dbs = asArray(p.d1_databases);
+  const name = dbs[0]?.database_name;
+  if (dbs.length !== 1 || !isObject(dbs[0])) refuse("pilot", "the pilot reference must name exactly one D1 database");
+  else if (typeof name !== "string" || !PILOT_DB_NAME.test(name) || isPlaceholder(name) || example.includes(norm(name))) refuse("pilot", "the pilot D1 database name is missing or malformed");
+  const account = p.account_id;
+  if (typeof account !== "string" || !/^[0-9a-f]{32}$|^[a-z0-9][a-z0-9_-]{3,63}$/i.test(account) || isPlaceholder(account)) refuse("pilot", "the pilot account id is missing or malformed");
+  const ok = violations.length === 0;
+  return { result: { ok, violations, warnings: [] }, dbName: ok ? name : undefined, accountId: ok ? account : undefined };
+}
+
 function checkSandboxShape(target, refuse) {
   for (const key of Object.keys(target)) if (!SANDBOX_TOP_KEYS.includes(key)) refuse(key, "key not allowed in a sandbox config");
   if (target.main !== SANDBOX_MAIN) refuse("main", `must be ${SANDBOX_MAIN}`);
