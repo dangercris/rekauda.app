@@ -29,7 +29,8 @@
     "prod:switch-apex": "node scripts/cloud-wrangler.mjs prod:switch-apex",
     "prod:status": "node scripts/cloud-wrangler.mjs prod:status",
     "pilot:export": "node scripts/cloud-wrangler.mjs pilot:export",
-    "pilot:cleanup": "node scripts/cloud-wrangler.mjs pilot:cleanup"
+    "pilot:cleanup": "node scripts/cloud-wrangler.mjs pilot:cleanup",
+    "pilot:import:plan": "node scripts/cloud-wrangler.mjs pilot:import:plan"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^8.0.0",
