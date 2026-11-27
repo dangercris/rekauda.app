@@ -44,11 +44,11 @@ const PRODUCTION_COMMANDS = {
  * the worker, account and root are printed before it is asked for. Each one runs its steps through productionRemote.
  */
 const DATA_COMMANDS = {
-  "prod:import": { phrase: "IMPORT", workdir: true, usage: "<workdir> <tenant-id> <slug>", run: runImport },
-  "prod:validate": { phrase: "VALIDATE", workdir: true, usage: "<workdir> <tenant-id> <slug>", run: runValidate },
-  // The undo needs no workdir, so it still works after pilot:cleanup.
-  "prod:undo-data": { phrase: "UNDO DATA", workdir: false, usage: "<tenant-id> <slug>", run: (args, ctx) => runUndo({ ...args, tenantLevel: false }, ctx) },
-  "prod:undo-tenant": { phrase: "UNDO TENANT", workdir: false, usage: "<tenant-id> <slug>", run: (args, ctx) => runUndo({ ...args, tenantLevel: true }, ctx) },
+  "prod:import": { phrase: "IMPORT", workdir: true, usage: "<workdir> <tenant-id> <slug>", methods: ["select", "file"], run: runImport },
+  "prod:validate": { phrase: "VALIDATE", workdir: true, usage: "<workdir> <tenant-id> <slug>", methods: ["select"], run: runValidate },
+  // The undo takes the workdir too: it refuses unless everything in the tenant is part of the import plan.
+  "prod:undo-data": { phrase: "UNDO DATA", workdir: true, usage: "<workdir> <tenant-id> <slug>", methods: ["select", "mutate"], run: (args, ctx) => runUndo({ ...args, tenantLevel: false }, ctx) },
+  "prod:undo-tenant": { phrase: "UNDO TENANT", workdir: true, usage: "<workdir> <tenant-id> <slug>", methods: ["select", "mutate"], run: (args, ctx) => runUndo({ ...args, tenantLevel: true }, ctx) },
 };
 const D1_ACTIONS = ["execute", "migrations"];
 const FORBIDDEN_LONG = ["--remote", "--config", "--env", "--env-file", "--persist-to", "--local"];
@@ -73,7 +73,13 @@ const scrubbedEnv = (env) => Object.fromEntries(SANDBOX_ENV_KEYS.filter((key) =>
  */
 function runSteps(steps, { root, spawn, log, env, checked, checkFn = loadAndCheckSandbox }) {
   for (const { bin, argv } of steps) {
-    const again = checkFn({ root });
+    let again;
+    try {
+      again = checkFn({ root });
+    } catch {
+      log.error("[cloud-wrangler] REFUSED: the config could not be read again before the command ran.");
+      return 1;
+    }
     report(again.result, log);
     if (!again.result.ok) return 1;
     if (JSON.stringify(again.target) !== checked) {
@@ -109,13 +115,26 @@ function runSandbox(subcommand, { root, bin, viteBin, spawn, log, now, env }) {
   }
 }
 
+/** First guard run of a production command. A missing or unparseable config is a generic refusal, never a stack trace. */
+function firstCheck(checkFn, root, log) {
+  let checked;
+  try {
+    checked = checkFn({ root });
+  } catch {
+    log.error("[cloud-wrangler] REFUSED: the production config could not be read or parsed.");
+    return undefined;
+  }
+  report(checked.result, log);
+  return checked.result.ok ? checked : undefined;
+}
+
 /** Runs a production subcommand: guard with the command's apex policy, typed phrase, then fixed argv with a scrubbed env. */
 function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confirm }) {
   const { apex, phrase: basePhrase } = PRODUCTION_COMMANDS[subcommand];
   const checkFn = ({ root: r }) => loadAndCheckProduction({ root: r, apex });
-  const { result, target } = checkFn({ root });
-  report(result, log);
-  if (!result.ok) return 1;
+  const checked = firstCheck(checkFn, root, log);
+  if (!checked) return 1;
+  const { target } = checked;
   const phrase = subcommand === "prod:deploy" && Array.isArray(target.routes) && target.routes.length > 1 ? PRODUCTION_COMMANDS["prod:switch-apex"].phrase : basePhrase;
   if (phrase !== undefined) {
     // What the operator is about to confirm: names only, never a token.
@@ -137,7 +156,7 @@ function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confir
  * against the fixed production config. The guard runs again before every spawn and the config must be unchanged. stdout and
  * stderr are captured and never shown (they can hold personal data). Failures are generic.
  */
-function productionRemote({ root, bin, spawn, env, log, checkFn, target }) {
+export function productionRemote({ root, bin, spawn, env, log, checkFn, target, methods }) {
   const checked = JSON.stringify(target);
   const invoke = (flag, value) => {
     const again = checkFn({ root });
@@ -147,7 +166,7 @@ function productionRemote({ root, bin, spawn, env, log, checkFn, target }) {
     if (done.error || done.status !== 0) throw new Error("remote command failed");
     return String(done.stdout ?? "");
   };
-  return {
+  const all = {
     select(sql) {
       if (!sql.startsWith("SELECT ") || !sql.endsWith(";") || sql.slice(0, -1).includes(";")) throw new Error("not a single SELECT");
       const parsed = JSON.parse(invoke("--command", sql));
@@ -164,11 +183,13 @@ function productionRemote({ root, bin, spawn, env, log, checkFn, target }) {
       invoke("--file", path);
     },
   };
+  // Least privilege: a command gets only the methods it declared in DATA_COMMANDS.
+  return Object.fromEntries(methods.map((name) => [name, all[name]]));
 }
 
 /** Runs a production data command: arguments, guard, printed target, typed phrase with the slug, then the command's own steps. */
 function runProductionData(subcommand, args, { root, bin, spawn, log, env, confirm, tmp }) {
-  const { phrase, workdir, usage, run } = DATA_COMMANDS[subcommand];
+  const { phrase, workdir, usage, methods, run } = DATA_COMMANDS[subcommand];
   const refuse = (why) => (log.error(`[cloud-wrangler] REFUSED: ${subcommand} ${why}`), 1);
   const [first, tenantId, slug] = workdir ? args : [undefined, ...args];
   if (args.length !== (workdir ? 3 : 2) || args.some((a) => a.startsWith("-")) || !UUID.test(tenantId) || !SLUG.test(slug)) return refuse(`takes exactly: ${usage}.`);
@@ -181,12 +202,12 @@ function runProductionData(subcommand, args, { root, bin, spawn, log, env, confi
     }
   }
   const checkFn = ({ root: r }) => loadAndCheckProduction({ root: r, apex: "any" });
-  const { result, target } = checkFn({ root });
-  report(result, log);
-  if (!result.ok) return 1;
+  const checked = firstCheck(checkFn, root, log);
+  if (!checked) return 1;
+  const { target } = checked;
   log.warn(`[cloud-wrangler] ${subcommand}: worker=${target.name} account=${target.account_id ?? "(not set)"} root=${target.vars.ROOT_DOMAIN} tenant=${tenantId} slug=${slug}`);
   if (!confirm(`${phrase} ${slug}`)) return refuse("needs the typed confirmation phrase on a terminal.");
-  const remote = productionRemote({ root, bin, spawn, env, log, checkFn, target });
+  const remote = productionRemote({ root, bin, spawn, env, log, checkFn, target, methods });
   return run({ ...opened, tenantId, slug }, { remote, log });
 }
 

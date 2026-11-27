@@ -1,11 +1,11 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseJsonc } from "./lib/jsonc.mjs";
 import { SLUG, makePilotWorld } from "./lib/import/pilot-world";
 import { TENANT_ID } from "./lib/import/pilot-fixture";
 // @ts-expect-error plain .mjs module without types
-import { runCloudWrangler } from "./lib/cloud-wrangler-core.mjs";
+import { productionRemote, runCloudWrangler } from "./lib/cloud-wrangler-core.mjs";
 
 // Production data commands (import). The fake spawn answers like wrangler would, from an in-memory Cloud database.
 const ROOT_DOMAIN = "colegio-demo.example.test";
@@ -64,7 +64,10 @@ describe("prod:import through the wrapper", () => {
       expect(call.argv[8]).toMatch(/^SELECT [^;]*;$/);
       expect(call.argv).toHaveLength(9);
     }
-    expect(w.calls.at(-1)!.argv).toEqual(["d1", "execute", "DB", "--remote", "--json", ...PROD_CONFIG, "--file", join(w.dir, "import.sql")]);
+    const last = w.calls.at(-1)!.argv;
+    expect(last.slice(0, 8)).toEqual(["d1", "execute", "DB", "--remote", "--json", ...PROD_CONFIG, "--file"]);
+    expect(last[8]).toMatch(new RegExp(`^${w.dir}/run-[A-Za-z0-9]+/import\\.sql$`));
+    expect(last).toHaveLength(9);
     expect(w.count("payments")).toBe(3);
   });
 
@@ -116,6 +119,25 @@ describe("prod:import through the wrapper", () => {
     expect(w.run("prod:import", [w.dir, TENANT_ID, SLUG], `IMPORT ${SLUG}`)).toBe(1);
     expect(w.calls).toHaveLength(1);
     expect(w.count("collections")).toBe(0);
+  });
+
+  it("gives a generic refusal, not a stack trace, for a missing or unparseable production config", () => {
+    for (const content of [undefined, "{ not json"]) {
+      const w = setup();
+      if (content === undefined) rmSync(join(w.root, "wrangler.production.jsonc"));
+      else writeFileSync(join(w.root, "wrangler.production.jsonc"), content);
+      expect(w.run("prod:import", [w.dir, TENANT_ID, SLUG], `IMPORT ${SLUG}`)).toBe(1);
+      expect(w.calls).toEqual([]);
+      expect(w.errors.join("\n")).toMatch(/production config could not be read/);
+      expect(w.errors.join("\n")).not.toMatch(/ENOENT|SyntaxError|at /);
+    }
+  });
+
+  it("a config that becomes unreadable midway stops the import cleanly before the file", () => {
+    const w = setup();
+    w.state.onCall = () => rmSync(join(w.root, "wrangler.production.jsonc"));
+    expect(w.run("prod:import", [w.dir, TENANT_ID, SLUG], `IMPORT ${SLUG}`)).toBe(1);
+    expect(w.calls).toHaveLength(1);
   });
 
   it("does not execute when the target is not clean (a tenant with the wrong source)", () => {
@@ -195,5 +217,12 @@ describe("prod:validate, prod:undo-data and prod:undo-tenant through the wrapper
     expect(w.run("prod:undo-tenant", [TENANT_ID, SLUG], `UNDO DATA ${SLUG}`)).toBe(1);
     expect(w.run("prod:undo-data", [TENANT_ID, SLUG], `IMPORT ${SLUG}`)).toBe(1);
     expect(w.calls).toEqual([]);
+  });
+});
+
+describe("productionRemote hands out only the methods it is asked for", () => {
+  const make = (methods: string[]) => productionRemote({ root: "/x/", bin: "w", spawn: () => ({ status: 1 }), env: {}, log: console, checkFn: () => ({ result: { ok: true, warnings: [], violations: [] }, target: {} }), target: {}, methods });
+  it.each([[["select", "file"]], [["select"]], [["select", "mutate"]]])("%j", (methods) => {
+    expect(Object.keys(make(methods)).sort()).toEqual([...methods].sort());
   });
 });

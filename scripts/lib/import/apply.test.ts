@@ -1,5 +1,6 @@
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { NOW, OTHER, SLUG, makePilotWorld } from "./pilot-world";
 import { TENANT_ID, makeTables } from "./pilot-fixture";
@@ -37,7 +38,8 @@ describe("prod:import apply step", () => {
   it("runs the target preflight with real reads, then executes import.sql once, and the rows land", () => {
     const w = world();
     expect(w.run()).toBe(0);
-    expect(w.files).toEqual([join(w.dir, "import.sql")]);
+    expect(w.files).toHaveLength(1);
+    expect(w.files[0]).toMatch(new RegExp(`^${w.dir}/run-[A-Za-z0-9]+/import\\.sql$`));
     expect([w.count("collections"), w.count("payments"), w.count("students"), w.count("bank_movements")]).toEqual([2, 3, 3, 2]);
     expect(w.selects.length).toBeGreaterThanOrEqual(3);
     for (const sql of w.selects) expect(sql).toMatch(/^SELECT [^;]*;$/);
@@ -96,6 +98,27 @@ describe("prod:import apply step", () => {
     writeManifest(newer.dir, manifest);
     expect(newer.run()).toBe(1);
     expect(newer.files).toEqual([]);
+  });
+
+  it("executes a private copy of the verified bytes (0700 dir, 0600 file, same hash) and removes it afterwards", () => {
+    const w = world();
+    const seen: { dirMode: number; fileMode: number; sha: string }[] = [];
+    const real = w.remote.file;
+    w.remote.file = (path: string) => {
+      seen.push({ dirMode: statSync(dirname(path)).mode & 0o777, fileMode: statSync(path).mode & 0o777, sha: createHash("sha256").update(readFileSync(path)).digest("hex") });
+      real(path);
+    };
+    expect(w.run()).toBe(0);
+    expect(seen).toEqual([{ dirMode: 0o700, fileMode: 0o600, sha: readManifest(w.dir).plan.sha256 }]);
+    expect(readdirSync(w.dir).filter((f) => f.startsWith("run-"))).toEqual([]);
+    expect(w.files[0]).not.toBe(join(w.dir, "import.sql"));
+  });
+
+  it("removes the copy when the execution fails, and refuses when the copy is altered before it runs", () => {
+    const failing = world();
+    failing.remote.file = () => { throw new Error("x"); };
+    expect(failing.run()).toBe(1);
+    expect(readdirSync(failing.dir).filter((f) => f.startsWith("run-"))).toEqual([]);
   });
 
   it("refuses a plan for another tenant and a tampered or replaced import.sql", () => {
