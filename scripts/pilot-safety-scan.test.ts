@@ -271,7 +271,7 @@ const tsProblems = (text: string): string[] => {
 describe("TS files that Node loads from the scripts", () => {
   const loaded = [...new Set(sources.flatMap((s) => [...s.text.matchAll(/from "((?:\.\.?\/)+[^"]*\.ts)"/g)].map((m) => new URL(m[1]!, new URL(s.name, "file://" + dir)).pathname)))];
   it("finds the TS files the scripts import", () => {
-    for (const name of ["storage/keys.ts", "shared/instance-validation.ts", "tenancy/host.ts", "tenancy/provision-sql.ts"]) expect(loaded.some((f) => f.endsWith("/src/" + (name.startsWith("shared") ? name : "worker/" + name))), name).toBe(true);
+    for (const name of ["storage/keys.ts", "shared/instance-validation.ts", "tenancy/host.ts", "tenancy/provision-sql.ts", "apex/legacy-redirects.ts"]) expect(loaded.some((f) => f.endsWith("/src/" + (name.startsWith("shared") ? name : "worker/" + name))), name).toBe(true);
   });
   it.each(loaded.map((f) => [f.slice(f.indexOf("/src/") + 1), f]))("%s needs nothing but type stripping", (_name, file) => {
     expect(tsProblems(readFileSync(file as string, "utf8"))).toEqual([]);

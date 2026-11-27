@@ -12,6 +12,8 @@
  *              everything else is served as static assets.
  * Contract:    src/shared/api.ts
  */
+import { serveApex } from "./apex/apex";
+import { legacyRedirectsValid, parseLegacyRedirects } from "./apex/legacy-redirects";
 import { serveDeunaQr } from "./assets";
 import { adminRoute } from "./admin";
 import type { MagicLinkDeps } from "./auth/magic-link";
@@ -32,6 +34,7 @@ import { createPayment, lookup } from "./payments";
 import { toPublicConfig } from "./public-config";
 import { R2MailArchive } from "./storage/mail-archive";
 import { D1ConfigStore, type ConfigStore } from "./tenancy/config-store";
+import { parseHost } from "./tenancy/host";
 import { tenancyState } from "./tenancy/runtime";
 import { HostTenantResolver, SingleTenantResolver, tenantNotFound, type TenantResolver } from "./tenancy/resolver";
 import type { Tenant } from "./tenancy/tenant";
@@ -195,7 +198,19 @@ function configStoreFor(env: CloudEnv): ConfigStore {
   return env.TENANCY === "multi" ? new D1ConfigStore(new PlatformDb(env.DB), tenancyState.configCache, tenancyState.configLastGood) : tenancyState.bundled;
 }
 
+/** Multi mode only: the apex host (root and www) is a landing plus the legacy redirect map, never a tenant. Other hosts and single mode are untouched. */
+function apexResponse(request: Request, env: CloudEnv, url: URL): Response | null {
+  if (env.TENANCY !== "multi" || parseHost(url.host, env.ROOT_DOMAIN).kind !== "apex") return null;
+  const raw = env.LEGACY_REDIRECTS;
+  const configured = raw !== undefined && raw !== null && !(typeof raw === "object" && Object.keys(raw).length === 0);
+  // An invalid map fails closed to empty. The log carries no map content, only that it was rejected.
+  if (configured && !legacyRedirectsValid(raw, env.ROOT_DOMAIN)) console.error(JSON.stringify({ message: "legacy redirects rejected: map ignored" }));
+  return serveApex(request, url, parseLegacyRedirects(raw, env.ROOT_DOMAIN));
+}
+
 async function route(request: Request, env: CloudEnv, ec: ExecutionContext, url: URL): Promise<Response> {
+  const apex = apexResponse(request, env, url);
+  if (apex) return apex;
   const tenant = await resolverFor(env, request).resolve(url.host);
   if (!tenant) return tenantNotFound();
   // A tenant without a valid config is not served at all: showing defaults would put someone else's account details on its pages.

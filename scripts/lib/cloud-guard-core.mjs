@@ -2,6 +2,9 @@
 // This tracked file holds NO pilot identifiers. The pilot's names, ids and domains come only from the local,
 // gitignored wrangler.jsonc and the optional gitignored .pilot-resources.json, and are never printed.
 // Values that also appear in the pilot example file are placeholders, not pilot data.
+// The one import is the zero-import LEGACY_REDIRECTS parser shared with the Worker (Node type stripping).
+
+import { legacyRedirectsValid } from "../../src/worker/apex/legacy-redirects.ts";
 
 const REQUIRED_MIGRATIONS_DIR = "migrations-cloud";
 const MODES = ["local", "remote"];
@@ -307,15 +310,6 @@ const canonId = (value) => {
 const limiterIds = (config, extraList) => [...asArray(config?.ratelimits).map((r) => r?.namespace_id), ...asArray(extraList)].filter((v) => typeof v === "string" || typeof v === "number").map(canonId);
 const isProdName = (value) => isPrefixedName(value, PRODUCTION_NAME_PREFIX);
 
-/** Legacy map: at most 20 entries, key /r/<slug>, value https://<slug>.<root>/r/<same slug>. Same rules as the Worker's parser (S7). */
-function legacyRedirectsValid(map, root) {
-  if (!isObject(map) || Object.keys(map).length > 20) return false;
-  return Object.entries(map).every(([key, value]) => {
-    const slug = /^\/r\/([a-z0-9-]{1,48})$/.exec(key)?.[1];
-    return slug !== undefined && value === `https://${slug}.${root}/r/${slug}`;
-  });
-}
-
 /** Routes must be exactly the wildcard, plus one apex entry (route or custom domain) depending on the command's apex policy. */
 function checkProductionRoutes(target, root, apex, refuse) {
   if ("route" in target || !Array.isArray(target.routes)) return refuse("route", "use a routes list: exactly the wildcard entry, plus the apex only in the switch step");
@@ -373,7 +367,8 @@ export function checkProductionConfig({ target, targetFile, pilot, pilotExample,
   if (vars.TENANCY !== "multi") refuse("vars.TENANCY", 'must be "multi"');
   if (!DNS_NAME.test(root) || root.endsWith(".workers.dev")) refuse("vars.ROOT_DOMAIN", "must be a DNS name and not workers.dev");
   if (vars.INBOUND_DOMAIN !== `in.${root}`) refuse("vars.INBOUND_DOMAIN", 'must be "in." + ROOT_DOMAIN');
-  if ("LEGACY_REDIRECTS" in vars && !legacyRedirectsValid(vars.LEGACY_REDIRECTS, root)) refuse("vars.LEGACY_REDIRECTS", "invalid legacy redirect map");
+  // Only judge the map once the root itself is valid (an invalid root is already refused above, naming ROOT_DOMAIN).
+  if ("LEGACY_REDIRECTS" in vars && DNS_NAME.test(normRoot(root)) && !legacyRedirectsValid(vars.LEGACY_REDIRECTS, normRoot(root))) refuse("vars.LEGACY_REDIRECTS", "invalid legacy redirect map");
   checkProductionRoutes(target, root, apex, refuse);
 
   for (const [key, allowed] of Object.entries({ ...SANDBOX_LIST_KEYS, send_email: ["name"] })) {
