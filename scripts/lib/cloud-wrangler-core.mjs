@@ -20,10 +20,15 @@ const SUBCOMMANDS = ["dev", "d1", "types"];
 const SANDBOX_SUBCOMMANDS = ["sandbox:migrate", "sandbox:seed", "sandbox:deploy", "sandbox:status"];
 const SANDBOX_CONFIG = ["--config", "wrangler.sandbox.jsonc"];
 const PRODUCTION_CONFIG = ["--config", "wrangler.production.jsonc"];
-/** Production commands: apex policy of the guard, and the phrase to type (none for the read-only status). */
+/**
+ * Production commands: apex policy of the guard, and the phrase to type (none for the read-only status).
+ * IMPORTANT: wrangler deploy replaces the Worker's route list. Removing the apex entry from the config and deploying
+ * DETACHES the apex and takes it offline. So prod:deploy accepts the apex entry, but whenever it is present the phrase
+ * is SWITCH APEX (same gate as prod:switch-apex): attaching or keeping the apex always needs an explicit confirmation.
+ */
 const PRODUCTION_COMMANDS = {
   "prod:migrate": { apex: "any", phrase: "MIGRATE PRODUCTION" },
-  "prod:deploy": { apex: "forbid", phrase: "DEPLOY PRODUCTION" },
+  "prod:deploy": { apex: "any", phrase: "DEPLOY PRODUCTION" },
   "prod:switch-apex": { apex: "require", phrase: "SWITCH APEX" },
   "prod:status": { apex: "any", phrase: undefined },
 };
@@ -88,11 +93,16 @@ function runSandbox(subcommand, { root, bin, viteBin, spawn, log, now, env }) {
 
 /** Runs a production subcommand: guard with the command's apex policy, typed phrase, then fixed argv with a scrubbed env. */
 function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confirm }) {
-  const { apex, phrase } = PRODUCTION_COMMANDS[subcommand];
+  const { apex, phrase: basePhrase } = PRODUCTION_COMMANDS[subcommand];
   const checkFn = ({ root: r }) => loadAndCheckProduction({ root: r, apex });
   const { result, target } = checkFn({ root });
   report(result, log);
   if (!result.ok) return 1;
+  const phrase = subcommand === "prod:deploy" && Array.isArray(target.routes) && target.routes.length > 1 ? PRODUCTION_COMMANDS["prod:switch-apex"].phrase : basePhrase;
+  if (phrase !== undefined) {
+    // What the operator is about to confirm: names only, never a token.
+    log.warn(`[cloud-wrangler] ${subcommand}: worker=${target.name} account=${target.account_id ?? "(not set)"} root=${target.vars.ROOT_DOMAIN}`);
+  }
   if (phrase !== undefined && !confirm(phrase)) {
     log.error(`[cloud-wrangler] REFUSED: ${subcommand} needs the typed confirmation phrase on a terminal.`);
     return 1;
@@ -107,7 +117,7 @@ function runProduction(subcommand, { root, bin, viteBin, spawn, log, env, confir
 /** root ends with a slash. Returns the exit status. */
 export function runCloudWrangler(args, { root, bin = root + "node_modules/.bin/wrangler", viteBin = root + "node_modules/.bin/vite", spawn = spawnSync, log = console, now = () => new Date().toISOString(), env = process.env, confirm = (phrase) => confirmTyped(phrase) }) {
   const [subcommand, ...rest] = args;
-  if (subcommand in PRODUCTION_COMMANDS) {
+  if (Object.hasOwn(PRODUCTION_COMMANDS, subcommand)) {
     const bad = forbiddenArg(rest);
     if (bad || rest.length > 0) {
       log.error(`[cloud-wrangler] REFUSED: ${subcommand} takes no arguments (${bad ?? "extra argument"} is fixed by the wrapper).`);

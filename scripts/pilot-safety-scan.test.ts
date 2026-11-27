@@ -41,11 +41,14 @@ describe("the only path to --remote", () => {
   ];
   const bodyOf = (fn: string) => {
     const from = wrapper.indexOf(fn);
-    const to = [wrapper.indexOf("\n}\n", from)].find((i) => i > -1)!;
-    return { from, to, text: wrapper.slice(from, to) };
+    return { from, to: wrapper.indexOf("\n}\n", from), text: "" };
   };
-  const bodies = REMOTE_FUNCTIONS.map((f) => ({ ...f, ...bodyOf(f.fn) }));
-  const outside = bodies.reduceRight((rest, b) => rest.slice(0, b.from) + rest.slice(b.to), wrapper).split("\n");
+  const bodies = REMOTE_FUNCTIONS.map((f) => {
+    const range = bodyOf(f.fn);
+    return { ...f, ...range, text: wrapper.slice(range.from, range.to) };
+  });
+  // Cut the ranges from the end of the file backwards, so the result does not depend on the order of the functions.
+  const outside = [...bodies].sort((x, y) => y.from - x.from).reduce((rest, b) => rest.slice(0, b.from) + rest.slice(b.to), wrapper).split("\n");
 
   it.each(bodies)("lives in $fn of the wrapper", ({ from, text }) => {
     expect(from).toBeGreaterThan(-1);
@@ -72,9 +75,10 @@ describe("the only path to --remote", () => {
     }
   });
 
-  it.each(bodies)("every remote step of $fn carries its fixed config", ({ config, text }) => {
-    expect(text).toContain(config);
-    for (const line of text.split("\n").filter((l) => l.includes('"--remote"'))) expect(line).toContain(config);
+  it.each(bodies)("every wrangler( call and remote step of $fn carries its fixed config", ({ config, text }) => {
+    const lines = text.split("\n").filter((l) => l.includes("wrangler(") || l.includes('"--remote"'));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).toContain(config);
   });
 });
 

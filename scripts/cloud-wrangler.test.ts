@@ -374,13 +374,14 @@ const prodConfig = (patch: Record<string, unknown> = {}): string => {
   const ratelimits = example.ratelimits.map((r: any, i: number) => ({ ...r, namespace_id: String(7001 + i) }));
   return JSON.stringify({ ...example, d1_databases: [{ ...example.d1_databases[0], database_id: PROD_DB_ID }], ratelimits, ...patch });
 };
-const prodSetup = (files: Record<string, string> = {}) => setup({ "wrangler.production.jsonc": prodConfig(), ".pilot-resources.json": JSON.stringify({ workers: ["fixture-pilot-worker"], d1Ids: ["11111111-aaaa-bbbb-cccc-222222222222"], buckets: ["fixture-pilot-bucket"], ratelimitIds: ["4242"] }), ...files });
+const prodSetup = (files: Record<string, string> = {}) => setup({ "wrangler.production.jsonc": prodConfig(), ".pilot-resources.json": JSON.stringify({ workers: ["fixture-pilot-worker"], d1Ids: ["11111111-aaaa-bbbb-cccc-222222222222"], buckets: ["fixture-pilot-bucket"], ratelimitIds: ["4242"], productionRoot: PROD_ROOT }), ...files });
 const PROD_PHRASES: Record<string, string> = { "prod:migrate": "MIGRATE PRODUCTION", "prod:deploy": "DEPLOY PRODUCTION", "prod:switch-apex": "SWITCH APEX" };
 
 /** Same as setup().run but with an injected confirmation, an env and a recording log. */
 function prodRun(root: string, calls: Call[], sub: string, { typed, env = {}, tty = true, args = [] as string[] }: { typed?: string; env?: Record<string, string>; tty?: boolean; args?: string[] } = {}) {
   const errors: string[] = [];
   const asked: string[] = [];
+  const notes: string[] = [];
   const spawn = (bin: string, argv: string[], options: { cwd: string; env?: Record<string, string> }) => {
     calls.push({ bin, argv, cwd: options.cwd, ...(options.env ? { env: options.env } : {}) } as Call);
     return { status: 0 };
@@ -389,9 +390,9 @@ function prodRun(root: string, calls: Call[], sub: string, { typed, env = {}, tt
     asked.push(phrase);
     return tty && typed === phrase;
   };
-  const log = { error: (m: string) => errors.push(String(m)), warn: () => undefined };
+  const log = { error: (m: string) => errors.push(String(m)), warn: (m: string) => notes.push(String(m)) };
   const status = runCloudWrangler([sub, ...args], { root: root + "/", bin: "w", viteBin: "v", spawn, log, env, confirm }) as number;
-  return { status, errors, asked };
+  return { status, errors, asked, notes };
 }
 
 describe("cloud-wrangler: production subcommands", () => {
@@ -413,11 +414,34 @@ describe("cloud-wrangler: production subcommands", () => {
     expect(calls.map((c) => c.argv)).toEqual([["build"], ["deploy", ...PROD_CONFIG]]);
   });
 
-  it("prod:deploy refuses a config that covers the apex, before asking", () => {
-    const { root, calls } = prodSetup({ "wrangler.production.jsonc": prodConfig({ routes: APEX_ROUTES }) });
-    const { status, errors, asked } = prodRun(root, calls, "prod:deploy", { typed: "DEPLOY PRODUCTION" });
-    expect([status, calls, asked]).toEqual([1, [], []]);
-    expect(errors.join("\n")).toContain("REFUSED routes");
+  it("prod:deploy with the apex entry present needs the SWITCH APEX phrase, never DEPLOY PRODUCTION", () => {
+    const apexConfig = { "wrangler.production.jsonc": prodConfig({ routes: APEX_ROUTES }) };
+    const refused = prodSetup(apexConfig);
+    const wrong = prodRun(refused.root, refused.calls, "prod:deploy", { typed: "DEPLOY PRODUCTION" });
+    expect([wrong.status, wrong.asked, refused.calls]).toEqual([1, ["SWITCH APEX"], []]);
+    const ok = prodSetup(apexConfig);
+    expect(prodRun(ok.root, ok.calls, "prod:deploy", { typed: "SWITCH APEX" }).status).toBe(0);
+    expect(ok.calls.map((c) => c.argv)).toEqual([["build"], ["deploy", ...PROD_CONFIG]]);
+  });
+
+  it("prod:deploy without the apex entry keeps the DEPLOY PRODUCTION phrase", () => {
+    const { root, calls } = prodSetup();
+    expect(prodRun(root, calls, "prod:deploy", { typed: "SWITCH APEX" }).status).toBe(1);
+    expect(prodRun(root, calls, "prod:deploy", { typed: "DEPLOY PRODUCTION" }).status).toBe(0);
+  });
+
+  it("shows the Worker name, account id and root before asking, and never the token", () => {
+    const { root, calls } = prodSetup({ "wrangler.production.jsonc": prodConfig({ account_id: "acct-fixture-0001" }) });
+    const { notes } = prodRun(root, calls, "prod:deploy", { typed: "DEPLOY PRODUCTION", env: { CLOUDFLARE_API_TOKEN: "tok-secret-1" } });
+    const text = notes.join("\n");
+    for (const shown of ["rekauda-cloud-app", "acct-fixture-0001", PROD_ROOT]) expect(text).toContain(shown);
+    expect(text).not.toContain("tok-secret-1");
+  });
+
+  it.each(["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"])("%s is not a production subcommand", (sub) => {
+    const { root, calls } = prodSetup();
+    expect(prodRun(root, calls, sub, { typed: "x" }).status).toBe(1);
+    expect(calls).toEqual([]);
   });
 
   it("prod:switch-apex refuses a wrong phrase, no TTY, and a config without the apex entry", () => {
@@ -452,7 +476,7 @@ describe("cloud-wrangler: production subcommands", () => {
   });
 
   it("refuses a pilot id, a missing config and a duplicated key without spawning", () => {
-    const shared = prodSetup({ ".pilot-resources.json": JSON.stringify({ workers: ["w"], d1Ids: [PROD_DB_ID], buckets: ["b"], ratelimitIds: ["4242"] }) });
+    const shared = prodSetup({ ".pilot-resources.json": JSON.stringify({ workers: ["w"], d1Ids: [PROD_DB_ID], buckets: ["b"], ratelimitIds: ["4242"], productionRoot: PROD_ROOT }) });
     const refused = prodRun(shared.root, shared.calls, "prod:status");
     expect(refused.status).toBe(1);
     expect(refused.errors.join("")).not.toContain(PROD_DB_ID);
